@@ -660,7 +660,7 @@ fn from_xdr_price(price: xdr::Price) -> String {
 fn account_id_to_address(account_id: &xdr::AccountId) -> String {
     let xdr::PublicKey::PublicKeyTypeEd25519(val) = account_id.0.clone();
     let key: Result<PublicKey, stellar_strkey::DecodeError> =
-        PublicKey::from_string(val.to_string().as_str());
+        PublicKey::from_payload(val.as_slice());
 
     if key.is_ok() {
         val.to_string()
