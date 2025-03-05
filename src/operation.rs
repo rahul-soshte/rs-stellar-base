@@ -302,7 +302,13 @@ impl OperationBehavior for Operation {
                     Value::Single(x.authorize.to_string()),
                 );
             }
-            xdr::OperationBody::AccountMerge(_) => todo!(),
+            xdr::OperationBody::AccountMerge(destination) => {
+                result.insert("type".into(), Value::Single("accountMerge".into()));
+                result.insert(
+                    "destination".into(),
+                    Value::Single(encode_muxed_account_to_address(&destination)),
+                );
+            }
             xdr::OperationBody::Inflation => {
                 result.insert("type".to_string(), Value::Single("inflation".to_string()));
             }
