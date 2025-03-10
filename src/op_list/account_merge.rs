@@ -8,10 +8,7 @@ impl Operation {
     /// from the ledger
     ///
     /// Threshold: High
-    pub fn account_merge(
-        destination: String,
-        source: Option<String>,
-    ) -> Result<xdr::Operation, String> {
+    pub fn account_merge(&self, destination: String) -> Result<xdr::Operation, String> {
         //
 
         let muxed = match decode_address_to_muxed_account_fix_for_g_address(&destination) {
@@ -19,9 +16,8 @@ impl Operation {
             _ => return Err("destination is invalid".to_string()),
         };
         let body = xdr::OperationBody::AccountMerge(muxed);
-        let source_account = source.map(|s| decode_address_to_muxed_account_fix_for_g_address(&s));
         Ok(xdr::Operation {
-            source_account,
+            source_account: self.source.clone(),
             body,
         })
     }
@@ -35,7 +31,7 @@ mod tests {
     #[test]
     fn test_account_merge() {
         let destination = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI".into();
-        let result = Operation::account_merge(destination, None);
+        let result = Operation::new(None).account_merge(destination);
         if let Ok(op) = result {
             let xdr = op.to_xdr(Limits::none()).unwrap();
             let obj = Operation::from_xdr_object(op).unwrap();
@@ -52,7 +48,7 @@ mod tests {
     fn test_account_merge_with_source() {
         let destination = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI".into();
         let source = Some("GAQODVWAY3AYAGEAT4CG3YSPM4FBTBB2QSXCYJLM3HVIV5ILTP5BRXCD".into());
-        let result = Operation::account_merge(destination, source);
+        let result = Operation::new(source).account_merge(destination);
         if let Ok(op) = result {
             let xdr = op.to_xdr(Limits::none()).unwrap();
             let obj = Operation::from_xdr_object(op).unwrap();

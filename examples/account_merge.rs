@@ -4,7 +4,7 @@ use stellar_baselib::{
     account::{Account, AccountBehavior},
     keypair::{Keypair, KeypairBehavior},
     network::{NetworkPassphrase, Networks},
-    operation::Operation,
+    operation::{Operation, OperationBehavior},
     transaction::TransactionBehavior,
     transaction_builder::{TransactionBuilder, TransactionBuilderBehavior},
     xdr::{Limits, WriteXdr},
@@ -24,7 +24,7 @@ pub fn main() {
     let destination = Keypair::random().unwrap().public_key();
     builder
         .fee(100u32)
-        .add_operation(Operation::account_merge(destination, None).unwrap());
+        .add_operation(Operation::new(None).account_merge(destination).unwrap());
 
     let mut tx = builder.build();
     tx.sign(&[kp]);
