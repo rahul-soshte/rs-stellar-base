@@ -333,7 +333,7 @@ mod tests {
         asset::{Asset, AssetBehavior},
         keypair::{self, Keypair},
         network::{NetworkPassphrase, Networks},
-        operation::{Operation, OperationBehavior},
+        operation::{self, Operation, OperationBehavior},
         transaction::TransactionBehavior,
         transaction_builder::{TransactionBuilder, TransactionBuilderBehavior, TIMEOUT_INFINITE},
     };
@@ -350,25 +350,14 @@ mod tests {
 
         let destination = "GAAOFCNYV2OQUMVONXH2DOOQNNLJO7WRQ7E4INEZ7VH7JNG7IKBQAK5D";
         let asset = Asset::native();
-        let amount = "2000";
-
-        // let operation = Operation::payment(PaymentOpts {
-        //         destination: destination.to_owned(),
-        //         asset,
-        //         amount: amount.to_owned(),
-        //         source: None,
-        //     }).unwrap();
+        let amount = 2000 * operation::ONE;
 
         let mut builder = TransactionBuilder::new(source.clone(), Networks::testnet(), None)
             .fee(100_u32)
             .add_operation(
-                Operation::payment(PaymentOpts {
-                    destination: destination.to_owned(),
-                    asset,
-                    amount: amount.to_owned(),
-                    source: None,
-                })
-                .unwrap(),
+                Operation::new(None)
+                    .payment(destination.to_owned(), &asset, amount)
+                    .unwrap(),
             )
             .add_memo("Happy birthday!")
             .set_timeout(TIMEOUT_INFINITE)
