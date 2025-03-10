@@ -14,7 +14,6 @@ use crate::account::Account;
 use crate::account::AccountBehavior;
 use crate::hashing::Sha256Hasher;
 use crate::keypair::Keypair;
-use crate::op_list::create_account::create_account;
 use crate::transaction::Transaction;
 use crate::utils::decode_encode_muxed_account::decode_address_fully_to_muxed_account;
 use crate::utils::decode_encode_muxed_account::decode_address_to_muxed_account;
@@ -239,6 +238,7 @@ mod tests {
     use xdr::{Hash, HostFunction, InvokeContractArgs, ScAddress, ScString, ScSymbol, ScVal};
 
     use super::*;
+    use crate::operation;
     // use crate::{
     //     account::Account, asset::{Asset, AssetBehavior}, keypair::{self, Keypair}, network::{NetworkPassphrase, Networks}, operation::PaymentOpts, transaction::TransactionBehavior
     // };
@@ -269,7 +269,9 @@ mod tests {
         let signer = Keypair::master(Some(Networks::testnet())).unwrap();
         let mut tx = TransactionBuilder::new(source, Networks::testnet(), None)
             .fee(100_u32)
-            .add_operation(create_account(destination, "10".to_string()).unwrap())
+            .add_operation(
+                Operation::create_account(destination, (10 * operation::ONE), None).unwrap(),
+            )
             .build();
 
         tx.sign(&[signer.clone()]);

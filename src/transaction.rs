@@ -16,7 +16,6 @@ use crate::account::Account;
 use crate::hashing::Sha256Hasher;
 use crate::keypair::Keypair;
 use crate::keypair::KeypairBehavior;
-use crate::op_list::create_account::create_account;
 use crate::xdr;
 use crate::xdr::ReadXdr;
 use crate::xdr::WriteXdr;
@@ -333,7 +332,7 @@ mod tests {
         asset::{Asset, AssetBehavior},
         keypair::{self, Keypair},
         network::{NetworkPassphrase, Networks},
-        operation::{Operation, OperationBehavior},
+        operation::{self, Operation, OperationBehavior},
         transaction::TransactionBehavior,
         transaction_builder::{TransactionBuilder, TransactionBuilderBehavior, TIMEOUT_INFINITE},
     };
@@ -381,7 +380,9 @@ mod tests {
         let signer = Keypair::master(Some(Networks::testnet())).unwrap();
         let mut tx = TransactionBuilder::new(source, Networks::testnet(), None)
             .fee(100_u32)
-            .add_operation(create_account(destination, "10".to_string()).unwrap())
+            .add_operation(
+                Operation::create_account(destination, (10 * operation::ONE), None).unwrap(),
+            )
             .build();
 
         tx.sign(&[signer.clone()]);
