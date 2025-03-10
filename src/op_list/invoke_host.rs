@@ -11,22 +11,12 @@ use std::str::FromStr;
 
 impl Operation {
     pub fn invoke_host_function(
+        &self,
         func: xdr::HostFunction,
         auth: Option<xdr::VecM<xdr::SorobanAuthorizationEntry>>,
-        source: Option<String>,
     ) -> Result<xdr::Operation, &'static str> {
-        let mut op = Operation {
-            op_attrs: None,
-            opts: None,
-        };
+        let auth_arr = auth.unwrap_or_default();
 
-        let auth_arr;
-
-        if auth.is_none() {
-            auth_arr = xdr::VecM::default();
-        } else {
-            auth_arr = auth.unwrap();
-        }
         let invoke_host_function_op = xdr::InvokeHostFunctionOp {
             host_function: func,
             auth: auth_arr,
@@ -34,13 +24,8 @@ impl Operation {
 
         let op_body = xdr::OperationBody::InvokeHostFunction(invoke_host_function_op);
 
-        if source.is_none() {
-        } else {
-            op.set_source_account(Some(&source.clone().unwrap()));
-        }
-
         Ok(xdr::Operation {
-            source_account: None,
+            source_account: self.source.clone(),
             body: op_body,
         })
     }
@@ -74,7 +59,9 @@ mod tests {
             .unwrap(),
         });
 
-        let op = Operation::invoke_host_function(func, None, None).unwrap();
+        let op = Operation::new(None)
+            .invoke_host_function(func, None)
+            .unwrap();
 
         let xdr = op.to_xdr(xdr::Limits::none()).unwrap();
         let obj = Operation::from_xdr_object(op).unwrap();

@@ -24,7 +24,7 @@ use crate::utils::decode_encode_muxed_account::{
     decode_address_to_muxed_account, encode_muxed_account_to_address,
 };
 
-const ONE: i32 = 10_000_000;
+pub const ONE: i64 = 10_000_000;
 const MAX_INT64: &str = "9223372036854775807";
 pub enum SignerKeyAttrs {
     Ed25519PublicKey(String),
@@ -37,8 +37,7 @@ pub const AUTH_REVOCABLE_FLAG: u32 = 1 << 1;
 pub const AUTH_IMMUTABLE_FLAG: u32 = 1 << 2;
 
 pub struct Operation {
-    pub op_attrs: Option<MuxedAccount>,
-    pub opts: Option<String>,
+    pub source: Option<xdr::MuxedAccount>,
 }
 
 pub struct OpAttributes {
@@ -61,7 +60,7 @@ pub struct PaymentOpts {
 }
 
 pub trait OperationBehavior {
-    fn set_source_account(&mut self, source: Option<&str>);
+    fn new(source: Option<String>) -> Self;
     fn from_xdr_object(operation: xdr::Operation) -> Result<HashMap<String, Value>, &'static str>;
     fn check_unsigned_int_value<F>(
         name: &str,
@@ -72,49 +71,10 @@ pub trait OperationBehavior {
         F: Fn(u32, &str) -> bool;
 }
 
-impl Operation {
-    pub fn payment(opts: PaymentOpts) -> Result<xdr::Operation, String> {
-        let destination = match decode_address_to_muxed_account_fix_for_g_address(&opts.destination)
-        {
-            account => account,
-            _ => return Err("destination is invalid".to_string()),
-        };
-
-        let asset: xdr::Asset = opts.asset.to_xdr_object();
-        let amount = match to_xdr_amount(&opts.amount) {
-            Ok(amount) => amount,
-            Err(e) => return Err(format!("Invalid amount: {}", e)),
-        };
-
-        let payment_op = xdr::PaymentOp {
-            asset,
-            amount,
-            destination,
-        };
-
-        let body = xdr::OperationBody::Payment(payment_op);
-
-        //TODO: Add Source Account
-        // if let Some(source) = opts.source {
-        //     match decode_address_to_muxed_account(&source).unwrap() {
-        //         Ok(account) => op_attributes.source_account = Some(account),
-        //         Err(_) => return Err("Source account is invalid".to_string()),
-        //     }
-        // }
-
-        Ok(xdr::Operation {
-            source_account: None,
-            body,
-        })
-    }
-}
 impl OperationBehavior for Operation {
-    fn set_source_account(&mut self, source: Option<&str>) {
-        if let Some(source) = &self.opts {
-            match decode_address_to_muxed_account(source) {
-                muxed_account => self.op_attrs = Some(muxed_account),
-                _ => panic!("Source address is invalid"),
-            }
+    fn new(source: Option<String>) -> Self {
+        Self {
+            source: source.map(|s| decode_address_to_muxed_account_fix_for_g_address(&s)),
         }
     }
 
