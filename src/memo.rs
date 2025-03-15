@@ -116,10 +116,7 @@ impl MemoBehavior for Memo {
     }
 
     fn _validate_text_value(value: &str) {
-        assert!(
-            value.len() <= 28,
-            "String is longer than 28 bytes"
-        );
+        assert!(value.len() <= 28, "String is longer than 28 bytes");
         let _ = xdr::Memo::Text(value.try_into().unwrap());
     }
 
@@ -133,10 +130,7 @@ impl MemoBehavior for Memo {
     }
 
     fn text(input: &str) -> Self {
-        assert!(
-            input.len() <= 28,
-            "String is longer than 28 bytes"
-        );
+        assert!(input.len() <= 28, "String is longer than 28 bytes");
 
         unsafe {
             Memo {

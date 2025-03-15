@@ -1,6 +1,8 @@
+use std::str::FromStr;
+
 use crate::{
-    operation::Operation,
-    utils::decode_encode_muxed_account::decode_address_to_muxed_account_fix_for_g_address, xdr,
+    operation::{self, Operation},
+    xdr,
 };
 
 impl Operation {
@@ -8,20 +10,13 @@ impl Operation {
     /// from the ledger
     ///
     /// Threshold: High
-    pub fn account_merge(
-        destination: String,
-        source: Option<String>,
-    ) -> Result<xdr::Operation, String> {
+    pub fn account_merge(&self, destination: &str) -> Result<xdr::Operation, operation::Error> {
         //
-
-        let muxed = match decode_address_to_muxed_account_fix_for_g_address(&destination) {
-            account => account,
-            _ => return Err("destination is invalid".to_string()),
-        };
+        let muxed = xdr::MuxedAccount::from_str(destination)
+            .map_err(|_| operation::Error::InvalidField("destination".into()))?;
         let body = xdr::OperationBody::AccountMerge(muxed);
-        let source_account = source.map(|s| decode_address_to_muxed_account_fix_for_g_address(&s));
         Ok(xdr::Operation {
-            source_account,
+            source_account: self.source.clone(),
             body,
         })
     }
@@ -29,40 +24,66 @@ impl Operation {
 
 #[cfg(test)]
 mod tests {
-    use crate::operation::{self, Operation, OperationBehavior};
-    use crate::xdr::{Limits, WriteXdr};
+    use std::str::FromStr;
+
+    use stellar_strkey::{ed25519, Strkey};
+
+    use crate::operation::{self, Operation};
+    use crate::xdr::{self, Limits, WriteXdr};
 
     #[test]
     fn test_account_merge() {
-        let destination = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI".into();
-        let result = Operation::account_merge(destination, None);
+        let destination = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+        let result = Operation::new().account_merge(destination);
         if let Ok(op) = result {
-            let xdr = op.to_xdr(Limits::none()).unwrap();
-            let obj = Operation::from_xdr_object(op).unwrap();
-
-            match obj.get("type").unwrap() {
-                operation::Value::Single(x) => assert_eq!(x, "accountMerge"),
-                _ => panic!("Invalid operation"),
-            };
-        } else {
-            panic!("Fail")
+            if let xdr::OperationBody::AccountMerge(xdr::MuxedAccount::Ed25519(xdr::Uint256(mpk))) =
+                op.body
+            {
+                if let Strkey::PublicKeyEd25519(ed25519::PublicKey(pk)) =
+                    Strkey::from_str(destination).unwrap()
+                {
+                    assert_eq!(mpk, pk);
+                    return;
+                }
+            }
         }
+        panic!("Fail")
     }
     #[test]
     fn test_account_merge_with_source() {
-        let destination = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI".into();
-        let source = Some("GAQODVWAY3AYAGEAT4CG3YSPM4FBTBB2QSXCYJLM3HVIV5ILTP5BRXCD".into());
-        let result = Operation::account_merge(destination, source);
-        if let Ok(op) = result {
-            let xdr = op.to_xdr(Limits::none()).unwrap();
-            let obj = Operation::from_xdr_object(op).unwrap();
+        let destination = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+        let source = "GAQODVWAY3AYAGEAT4CG3YSPM4FBTBB2QSXCYJLM3HVIV5ILTP5BRXCD";
+        let result = Operation::with_source(source)
+            .unwrap()
+            .account_merge(destination);
 
-            match obj.get("type").unwrap() {
-                operation::Value::Single(x) => assert_eq!(x, "accountMerge"),
-                _ => panic!("Invalid operation"),
-            };
-        } else {
-            panic!("Fail")
+        if let Ok(op) = result {
+            if let xdr::OperationBody::AccountMerge(xdr::MuxedAccount::Ed25519(xdr::Uint256(mpk))) =
+                op.body
+            {
+                if let Strkey::PublicKeyEd25519(ed25519::PublicKey(pk)) =
+                    Strkey::from_str(destination).unwrap()
+                {
+                    assert_eq!(mpk, pk);
+                    assert_eq!(
+                        op.source_account,
+                        Some(xdr::MuxedAccount::from_str(source).unwrap())
+                    );
+                    return;
+                }
+            }
         }
+        panic!("Fail")
+    }
+
+    #[test]
+    fn test_account_merge_bad_destination() {
+        let dest = &Strkey::Contract(stellar_strkey::Contract([0; 32])).to_string();
+        let r = Operation::new().account_merge(dest);
+
+        assert_eq!(
+            r.err().unwrap(),
+            operation::Error::InvalidField("destination".into())
+        );
     }
 }

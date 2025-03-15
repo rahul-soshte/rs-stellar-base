@@ -1,38 +1,94 @@
-use crate::operation::is_valid_amount;
+use std::str::FromStr;
+
+use crate::operation::{self, Operation};
 use crate::xdr;
-use crate::{
-    keypair::*, operation::to_xdr_amount,
-    utils::decode_encode_muxed_account::decode_address_to_muxed_account,
-};
-use hex_literal::hex;
-use sha2::digest::crypto_common::Key;
-use stellar_strkey::ed25519::PublicKey;
-use stellar_strkey::*;
-/// Creates and funds a new account with the specified starting balance
-pub fn create_account(
-    destination: String,
-    starting_balance: String,
-) -> Result<xdr::Operation, Box<dyn std::error::Error>> {
-    let key = PublicKey::from_string(&destination);
+impl Operation {
+    /// Creates and funds a new account with the specified starting balance
+    /// (the `starting_balance` is in stroops)
+    ///
+    /// Threshold: Medium
+    pub fn create_account(
+        &self,
+        destination: &str,
+        starting_balance: i64,
+    ) -> Result<xdr::Operation, operation::Error> {
+        if starting_balance.is_negative() {
+            return Err(operation::Error::InvalidAmount(starting_balance));
+        }
+        let destination = xdr::AccountId::from_str(destination)
+            .map_err(|_| operation::Error::InvalidField("destination".into()))?;
+        let body = xdr::OperationBody::CreateAccount(xdr::CreateAccountOp {
+            destination,
+            starting_balance,
+        });
 
-    if key.is_err() {
-        return Err("destination is invalid".into());
+        Ok(xdr::Operation {
+            source_account: self.source.clone(),
+            body,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        account::Account,
+        keypair::{self, Keypair},
+    };
+    use keypair::KeypairBehavior;
+    use stellar_strkey::Strkey;
+    use xdr::{Int64, OperationBody, ReadXdr};
+
+    use super::*;
+
+    #[test]
+    fn create_account_op_test() {
+        let destination = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
+        let starting_balance = 1000 * operation::ONE;
+
+        let op = Operation::new()
+            .create_account(destination, starting_balance)
+            .unwrap();
+
+        if let OperationBody::CreateAccount(op) = op.body {
+            assert_eq!(op.starting_balance, starting_balance);
+            let xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(pk))) =
+                op.destination;
+            if let Strkey::PublicKeyEd25519(stellar_strkey::ed25519::PublicKey(from_pk)) =
+                Strkey::from_str(destination).unwrap()
+            {
+                assert_eq!(pk, from_pk);
+                assert_eq!(op.starting_balance, starting_balance);
+                return;
+            }
+        }
+        panic!("op is not the type expected");
     }
 
-    if !is_valid_amount(&starting_balance, true) {
-        return Err("startingBalance must be of type String, represent a non-negative number and have at most 7 digits after the decimal".into());
-    }
-    let dest = Keypair::from_public_key(&destination)
-        .unwrap()
-        .xdr_account_id();
-    let starting_balance = to_xdr_amount(&starting_balance)?;
-    let body = xdr::OperationBody::CreateAccount(xdr::CreateAccountOp {
-        destination: dest,
-        starting_balance,
-    });
+    #[test]
+    fn test_create_account_bad_amount() {
+        let destination = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
+        let starting_balance = -1000 * operation::ONE;
 
-    Ok(xdr::Operation {
-        source_account: None,
-        body,
-    })
+        let op = Operation::new().create_account(destination, starting_balance);
+
+        assert_eq!(
+            op.err().unwrap(),
+            operation::Error::InvalidAmount(starting_balance)
+        );
+    }
+
+    #[test]
+    fn test_payment_bad_destination() {
+        let destination = &Strkey::Contract(stellar_strkey::Contract([0; 32])).to_string();
+        let starting_balance = 1000 * operation::ONE;
+
+        let op = Operation::new().create_account(destination, starting_balance);
+
+        assert_eq!(
+            op.err().unwrap(),
+            operation::Error::InvalidField("destination".into())
+        );
+    }
 }
