@@ -44,6 +44,7 @@ pub struct Operation {
 pub enum Error {
     InvalidField(String),
     InvalidAmount(i64),
+    InvalidPrice(i32, i32),
 }
 
 impl Operation {

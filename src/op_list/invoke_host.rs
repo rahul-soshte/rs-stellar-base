@@ -183,6 +183,7 @@ mod tests {
             .unwrap(),
         });
 
+
         let op = Operation::new()
             .invoke_host_function(func.clone(), None)
             .unwrap();
