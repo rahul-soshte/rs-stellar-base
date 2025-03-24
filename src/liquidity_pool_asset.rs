@@ -11,6 +11,29 @@ pub struct LiquidityPoolAsset {
     fee: i32,
 }
 
+// TODO: fix that
+impl From<&LiquidityPoolAsset> for xdr::TrustLineAsset {
+    fn from(value: &LiquidityPoolAsset) -> Self {
+        let pool_id = LiquidityPool::get_liquidity_pool_id(
+            "constant_product",
+            value.get_liquidity_pool_parameters().clone(),
+        )
+        .unwrap();
+        xdr::TrustLineAsset::PoolShare(xdr::PoolId(xdr::Hash(*pool_id.last_chunk::<32>().unwrap())))
+    }
+}
+// TODO: fix that
+impl From<LiquidityPoolAsset> for xdr::TrustLineAsset {
+    fn from(value: LiquidityPoolAsset) -> Self {
+        let pool_id = LiquidityPool::get_liquidity_pool_id(
+            "constant_product",
+            value.get_liquidity_pool_parameters().clone(),
+        )
+        .unwrap();
+        xdr::TrustLineAsset::PoolShare(xdr::PoolId(xdr::Hash(*pool_id.last_chunk::<32>().unwrap())))
+    }
+}
+
 // Define a trait for LiquidityPoolAsset behavior
 pub trait LiquidityPoolAssetBehavior {
     fn new(asset_a: Asset, asset_b: Asset, fee: i32) -> Result<Self, &'static str>
