@@ -5,12 +5,25 @@ use crate::keypair::Keypair;
 use crate::utils::util::trim_end;
 use crate::xdr;
 use regex::Regex;
-use stellar_strkey::Strkey::{self, PublicKeyEd25519};
+use stellar_strkey::{
+    ed25519,
+    Strkey::{self, PublicKeyEd25519},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
     pub code: String,
     pub issuer: Option<String>,
+}
+impl From<&Asset> for xdr::TrustLineAsset {
+    fn from(value: &Asset) -> Self {
+        value.to_trust_line_xdr_object()
+    }
+}
+impl From<Asset> for xdr::TrustLineAsset {
+    fn from(value: Asset) -> Self {
+        value.to_trust_line_xdr_object()
+    }
 }
 
 // Define a trait for Asset behavior
@@ -80,7 +93,7 @@ impl AssetBehavior for Asset {
                 let anum = alpha_num_4;
                 let issuer = Some(anum.issuer.0);
                 let issuer = if let Some(xdr::PublicKey::PublicKeyTypeEd25519(inner)) = issuer {
-                    Some(stellar_strkey::ed25519::PublicKey(inner.0).to_string())
+                    Some(ed25519::PublicKey(inner.0).to_string())
                 } else {
                     None
                 };
@@ -94,7 +107,7 @@ impl AssetBehavior for Asset {
                 let anum = alpha_num_12;
                 let issuer = Some(anum.issuer.0);
                 let issuer = if let Some(xdr::PublicKey::PublicKeyTypeEd25519(inner)) = issuer {
-                    Some(stellar_strkey::ed25519::PublicKey(inner.0).to_string())
+                    Some(ed25519::PublicKey(inner.0).to_string())
                 } else {
                     None
                 };
@@ -136,7 +149,7 @@ impl AssetBehavior for Asset {
             }
 
             let addr = xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
-                stellar_strkey::ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
+                ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
                     .unwrap()
                     .0,
             )));
@@ -157,7 +170,7 @@ impl AssetBehavior for Asset {
             }
 
             let addr = xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
-                stellar_strkey::ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
+                ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
                     .unwrap()
                     .0,
             )));
@@ -184,7 +197,7 @@ impl AssetBehavior for Asset {
             }
 
             let addr = xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
-                stellar_strkey::ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
+                ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
                     .unwrap()
                     .0,
             )));
@@ -205,7 +218,7 @@ impl AssetBehavior for Asset {
             }
 
             let addr = xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
-                stellar_strkey::ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
+                ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
                     .unwrap()
                     .0,
             )));
@@ -230,7 +243,7 @@ impl AssetBehavior for Asset {
             }
 
             let addr = xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
-                stellar_strkey::ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
+                ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
                     .unwrap()
                     .0,
             )));
@@ -252,7 +265,7 @@ impl AssetBehavior for Asset {
             }
 
             let addr = xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
-                stellar_strkey::ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
+                ed25519::PublicKey::from_string(&self.issuer.clone().unwrap())
                     .unwrap()
                     .0,
             )));
