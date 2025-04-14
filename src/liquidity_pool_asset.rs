@@ -33,6 +33,16 @@ impl From<LiquidityPoolAsset> for xdr::TrustLineAsset {
         xdr::TrustLineAsset::PoolShare(xdr::PoolId(xdr::Hash(*pool_id.last_chunk::<32>().unwrap())))
     }
 }
+impl From<&LiquidityPoolAsset> for xdr::ChangeTrustAsset {
+    fn from(value: &LiquidityPoolAsset) -> Self {
+        value.to_xdr_object()
+    }
+}
+impl From<LiquidityPoolAsset> for xdr::ChangeTrustAsset {
+    fn from(value: LiquidityPoolAsset) -> Self {
+        value.to_xdr_object()
+    }
+}
 
 // Define a trait for LiquidityPoolAsset behavior
 pub trait LiquidityPoolAssetBehavior {

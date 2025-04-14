@@ -25,6 +25,16 @@ impl From<Asset> for xdr::TrustLineAsset {
         value.to_trust_line_xdr_object()
     }
 }
+impl From<&Asset> for xdr::ChangeTrustAsset {
+    fn from(value: &Asset) -> Self {
+        value.to_change_trust_xdr_object()
+    }
+}
+impl From<Asset> for xdr::ChangeTrustAsset {
+    fn from(value: Asset) -> Self {
+        value.to_change_trust_xdr_object()
+    }
+}
 
 // Define a trait for Asset behavior
 pub trait AssetBehavior {
