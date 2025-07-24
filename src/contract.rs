@@ -48,9 +48,9 @@ impl ContractBehavior for Contracts {
             source_account: None,
             body: xdr::OperationBody::InvokeHostFunction(xdr::InvokeHostFunctionOp {
                 host_function: xdr::HostFunction::InvokeContract(xdr::InvokeContractArgs {
-                    contract_address: xdr::ScAddress::Contract(xdr::Hash(
+                    contract_address: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
                         contract_id_strkey(String::from_utf8(self.id.clone()).unwrap().as_str()).0,
-                    )),
+                    ))),
                     function_name: xdr::ScSymbol::from(xdr::StringM::from_str(method).unwrap()),
                     args: xdr::VecM::<xdr::ScVal>::try_from(params.unwrap_or_default()).unwrap(),
                 }),
@@ -79,9 +79,9 @@ impl ContractBehavior for Contracts {
 
     fn get_footprint(&self) -> xdr::LedgerKey {
         xdr::LedgerKey::ContractData(xdr::LedgerKeyContractData {
-            contract: xdr::ScAddress::Contract(xdr::Hash(
+            contract: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
                 contract_id_strkey(&self.contract_id()).0,
-            )),
+            ))),
             key: xdr::ScVal::LedgerKeyContractInstance,
             durability: xdr::ContractDataDurability::Persistent,
         })
@@ -165,7 +165,7 @@ mod tests {
 
         // Build the expected footprint
         let expected_footprint = xdr::LedgerKey::ContractData(xdr::LedgerKeyContractData {
-            contract: xdr::ScAddress::Contract(xdr::Hash(contract_id_strkey(NULL_ADDRESS).0)),
+            contract: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(contract_id_strkey(NULL_ADDRESS).0))),
             key: xdr::ScVal::LedgerKeyContractInstance,
             durability: xdr::ContractDataDurability::Persistent,
         });
@@ -192,7 +192,7 @@ mod tests {
 
         // Expected contract address
         let expected_contract_address =
-            xdr::ScAddress::Contract(xdr::Hash(contract_id_strkey(NULL_ADDRESS).0));
+            xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(contract_id_strkey(NULL_ADDRESS).0)));
 
         // Verify the operation structure
         if let OperationBody::InvokeHostFunction(host_function_op) = operation.body {
@@ -281,7 +281,7 @@ mod tests {
         if let OperationBody::InvokeHostFunction(host_function_op) = operation.body {
             if let xdr::HostFunction::InvokeContract(args) = host_function_op.host_function {
                 let expected_address =
-                    xdr::ScAddress::Contract(xdr::Hash(contract_id_strkey(NULL_ADDRESS).0));
+                    xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(contract_id_strkey(NULL_ADDRESS).0)));
                 assert_eq!(args.contract_address, expected_address);
             } else {
                 panic!("Expected InvokeContract host function");

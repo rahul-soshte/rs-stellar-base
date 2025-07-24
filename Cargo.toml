@@ -23,8 +23,8 @@ rand_core = { version = "0.6.4", default-features = true, features = [
 ] }
 getrandom = { version = "0.2.10", features = ["js"] }
 sha2 = "0.10.7"
-stellar-strkey = "0.0.9"
-stellar-xdr = { version = "22.1.0", default-features = true, features = [
+stellar-strkey = "0.0.13"
+stellar-xdr = { version = "23.0.0-rc.2", default-features = true, features = [
   "base64",
   "std",
   "serde",

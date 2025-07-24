@@ -12,6 +12,7 @@ impl Operation {
         let mut h = [0; 32];
         hex::decode_to_slice(balance_id, &mut h)
             .map_err(|_| operation::Error::InvalidField("balance_id".into()))?;
+        
         let xdr_balance_id = xdr::ClaimableBalanceId::ClaimableBalanceIdTypeV0(xdr::Hash(h));
         let body = xdr::OperationBody::ClawbackClaimableBalance(xdr::ClawbackClaimableBalanceOp {
             balance_id: xdr_balance_id,

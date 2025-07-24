@@ -37,14 +37,14 @@ pub mod xdr {
     /*
      * Why no consistent naming here?
      */
-    #[cfg(not(feature = "next"))]
-    pub use stellar_xdr::curr::ExtensionPoint as SorobanTransactionDataExt;
+    // #[cfg(not(feature = "next"))]
+    // pub use stellar_xdr::curr::ExtensionPoint as SorobanTransactionDataExt;
 
     #[cfg(not(feature = "next"))]
     pub use stellar_xdr::curr::*;
 
-    #[cfg(feature = "next")]
-    pub use stellar_xdr::next::SorobanTransactionDataExt;
+    // #[cfg(feature = "next")]
+    // pub use stellar_xdr::next::SorobanTransactionDataExt;
 
     #[cfg(feature = "next")]
     pub use stellar_xdr::next::*;

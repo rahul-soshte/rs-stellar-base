@@ -483,7 +483,7 @@ mod tests {
         array.copy_from_slice(&hex_id[0..32]);
 
         let func = HostFunction::InvokeContract(InvokeContractArgs {
-            contract_address: ScAddress::from(Contract(Hash::from(array))),
+            contract_address: ScAddress::from(Contract(xdr::ContractId(Hash::from(array)))),
             function_name: ScSymbol::from(xdr::StringM::from_str("hello").unwrap()),
             args: vec![ScVal::String(ScString::from(
                 xdr::StringM::from_str("world").unwrap(),
@@ -527,7 +527,7 @@ mod tests {
         array.copy_from_slice(&hex_id[0..32]);
 
         let func = HostFunction::InvokeContract(InvokeContractArgs {
-            contract_address: ScAddress::from(Contract(Hash::from(array))),
+            contract_address: ScAddress::from(Contract(xdr::ContractId(Hash::from(array)))),
             function_name: ScSymbol::from(xdr::StringM::from_str("hello").unwrap()),
             args: vec![xdr::ScVal::String(ScString::from(
                 xdr::StringM::from_str("world").unwrap(),
@@ -582,7 +582,7 @@ mod tests {
         array.copy_from_slice(&hex_id[0..32]);
 
         let func = HostFunction::InvokeContract(InvokeContractArgs {
-            contract_address: ScAddress::from(Contract(Hash::from(array))),
+            contract_address: ScAddress::from(Contract(xdr::ContractId(Hash::from(array)))),
             function_name: ScSymbol::from(xdr::StringM::from_str("hello").unwrap()),
             args: vec![ScVal::String(ScString::from(
                 xdr::StringM::from_str("world").unwrap(),

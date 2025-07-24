@@ -130,7 +130,8 @@ impl AddressTrait for Address {
 
                 Self::account(&m.0)
             }
-            xdr::ScAddress::Contract(hash) => Self::contract(&hash.0),
+            xdr::ScAddress::Contract(hash) => Self::contract(&hash.0.0),
+            _ => panic!("TODO: Handle all edge cases")
         }
     }
 
@@ -167,7 +168,7 @@ impl AddressTrait for Address {
 
             AddressType::Contract => {
                 let original = self.key.last_chunk::<32>().unwrap();
-                Ok(xdr::ScAddress::Contract(xdr::Hash(*original)))
+                Ok(xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(*original))))
             }
             _ => Err("Unsupported type"),
         }
@@ -273,7 +274,7 @@ mod tests {
         let contract = Contract::from_string(CONTRACT).expect("Failed to decode contract address");
 
         // Create ScAddress for contract
-        let sc_address = xdr::ScAddress::Contract(xdr::Hash(contract.0));
+        let sc_address = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(contract.0)));
 
         // Convert ScAddress to Address
         let contract_address =
@@ -316,7 +317,8 @@ mod tests {
             }
             xdr::ScAddress::Contract(_) => {
                 panic!("Expected ScAddress to be an Account type")
-            }
+            },
+            _ => panic!("not implemented yet") // TODO: Work on all possible type matches.
         }
 
         // To make this more similar to the JS test, we can also check the explicit type

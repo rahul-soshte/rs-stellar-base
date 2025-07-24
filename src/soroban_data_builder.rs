@@ -49,7 +49,7 @@ impl SorobanDataBuilderBehavior for SorobanDataBuilder {
                                 read_write: Vec::new().try_into().unwrap(),
                             },
                             instructions: 0,
-                            read_bytes: 0,
+                            disk_read_bytes: 0,
                             write_bytes: 0,
                         },
                         resource_fee: 0,
@@ -70,7 +70,7 @@ impl SorobanDataBuilderBehavior for SorobanDataBuilder {
                         read_write: Vec::new().try_into().unwrap(),
                     },
                     instructions: 0,
-                    read_bytes: 0,
+                    disk_read_bytes: 0,
                     write_bytes: 0,
                     // extended_meta_data_size_bytes: 0,
                 },
@@ -160,7 +160,7 @@ impl SorobanDataBuilderBehavior for SorobanDataBuilder {
 
     fn set_resources(&mut self, instructions: u32, read_bytes: u32, write_bytes: u32) -> &mut Self {
         self.data.resources.instructions = instructions;
-        self.data.resources.read_bytes = read_bytes;
+        self.data.resources.disk_read_bytes = read_bytes;
         self.data.resources.write_bytes = write_bytes;
         self
     }
@@ -182,7 +182,7 @@ mod tests {
                     read_write: Vec::new().try_into().unwrap(),
                 },
                 instructions: 1,
-                read_bytes: 2,
+                disk_read_bytes: 2,
                 write_bytes: 3,
             },
             resource_fee: 5,
@@ -224,7 +224,7 @@ mod tests {
                     read_write: Vec::new().try_into().unwrap(),
                 },
                 instructions: 1,
-                read_bytes: 2,
+                disk_read_bytes: 2,
                 write_bytes: 3,
             },
             resource_fee: 5,
