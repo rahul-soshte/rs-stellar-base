@@ -376,19 +376,17 @@ mod tests {
 
     #[test]
     fn constructs_transaction_object_from_transaction_envelope() {
-        let source = Rc::new(RefCell::new(
-            Account::new(
-                "GBBM6BKZPEHWYO3E3YKREDPQXMS4VK35YLNU7NFBRI26RAN7GI5POFBB",
-                "20",
-            )
-            .unwrap(),
-        ));
+        let mut source = Account::new(
+            "GBBM6BKZPEHWYO3E3YKREDPQXMS4VK35YLNU7NFBRI26RAN7GI5POFBB",
+            "20",
+        )
+        .unwrap();
 
         let destination = "GAAOFCNYV2OQUMVONXH2DOOQNNLJO7WRQ7E4INEZ7VH7JNG7IKBQAK5D";
         let asset = Asset::native();
         let amount = 2000 * operation::ONE;
 
-        let mut builder = TransactionBuilder::new(source.clone(), Networks::testnet(), None)
+        let mut builder = TransactionBuilder::new(&mut source, Networks::testnet(), None)
             .fee(100_u32)
             .add_operation(
                 Operation::new()
@@ -404,7 +402,7 @@ mod tests {
 
         let destination = "GDJJRRMBK4IWLEPJGIE6SXD2LP7REGZODU7WDC3I2D6MR37F4XSHBKX2";
         let signer = Keypair::master(Some(Networks::testnet())).unwrap();
-        let mut tx = TransactionBuilder::new(source, Networks::testnet(), None)
+        let mut tx = TransactionBuilder::new(&mut source, Networks::testnet(), None)
             .fee(100_u32)
             .add_operation(
                 Operation::new()
