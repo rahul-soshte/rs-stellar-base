@@ -284,7 +284,10 @@ impl<'a> TransactionBuilder<'a> {
         let source = self.source.as_ref().expect("Source account not set");
 
         // Calculate the next sequence number (current + 1) without mutating the account
-        let current_seq: i64 = source.sequence_number().parse().expect("Invalid sequence number");
+        let current_seq: i64 = source
+            .sequence_number()
+            .parse()
+            .expect("Invalid sequence number");
         let next_sequence_number = (current_seq + 1).to_string();
         let account_id = source.account_id();
 
@@ -427,10 +430,7 @@ mod tests {
 
         let transaction = builder.build();
 
-        assert_eq!(
-            transaction.source,
-            Some(source.account_id().to_string())
-        );
+        assert_eq!(transaction.source, Some(source.account_id().to_string()));
         assert_eq!(transaction.sequence.unwrap(), "1");
         assert_eq!(source.sequence_number(), "1");
         assert_eq!(transaction.operations.unwrap().len(), 1);
@@ -470,10 +470,7 @@ mod tests {
 
         let transaction = builder.build();
 
-        assert_eq!(
-            transaction.source,
-            Some(source.account_id().to_string())
-        );
+        assert_eq!(transaction.source, Some(source.account_id().to_string()));
         assert_eq!(transaction.sequence.unwrap(), "1");
         assert_eq!(source.sequence_number(), "1");
         assert_eq!(transaction.operations.unwrap().len(), 2);
@@ -530,11 +527,8 @@ mod tests {
             max_time: xdr::TimePoint(1455297545),
         };
 
-        let mut builder = TransactionBuilder::new(
-            &mut source,
-            Networks::testnet(),
-            Some(timebounds.clone()),
-        );
+        let mut builder =
+            TransactionBuilder::new(&mut source, Networks::testnet(), Some(timebounds.clone()));
         builder.fee(100_u32).add_operation(
             Operation::new()
                 .payment(
