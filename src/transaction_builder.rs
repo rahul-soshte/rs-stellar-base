@@ -42,6 +42,7 @@ pub struct TransactionBuilder<'a> {
 
 // Define a trait for TransactionBuilder behavior
 pub trait TransactionBuilderBehavior<'a> {
+    fn build_for_simulation(&self) -> Transaction;
     fn set_soroban_data_from_xdr_base64(&mut self, soroban_data: &str) -> &mut Self;
     fn new(
         source_account: &'a mut Account,
@@ -228,9 +229,8 @@ impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
             //tx_v0: None,
         }
     }
-}
 
-impl<'a> TransactionBuilder<'a> {
+
     /// # Build a transaction for simulation only
     ///
     /// This method builds a transaction without incrementing the source account's sequence number.
@@ -280,7 +280,7 @@ impl<'a> TransactionBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn build_for_simulation(&self) -> Transaction {
+    fn build_for_simulation(&self) -> Transaction {
         let source = self.source.as_ref().expect("Source account not set");
 
         // Calculate the next sequence number (current + 1) without mutating the account
