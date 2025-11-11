@@ -230,7 +230,6 @@ impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
         }
     }
 
-
     /// # Build a transaction for simulation only
     ///
     /// This method builds a transaction without incrementing the source account's sequence number.
