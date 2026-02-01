@@ -55,6 +55,7 @@ pub trait TransactionBuilderBehavior<'a> {
     fn add_memo(&mut self, memo_text: &str) -> &mut Self;
     fn set_timeout(&mut self, timeout_seconds: i64) -> Result<&mut Self, String>;
     fn set_time_bounds(&mut self, time_bounds: xdr::TimeBounds) -> &mut Self;
+    fn set_ledger_bounds(&mut self, ledger_bounds: xdr::LedgerBounds) -> &mut Self;
     fn set_soroban_data(&mut self, soroban_data: xdr::SorobanTransactionData) -> &mut Self;
     fn clear_operations(&mut self) -> &mut Self;
 }
@@ -147,6 +148,11 @@ impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
         self
     }
 
+    fn set_ledger_bounds(&mut self, ledger_bounds: xdr::LedgerBounds) -> &mut Self {
+        self.ledger_bounds = Some(ledger_bounds);
+        self
+    }
+
     fn set_soroban_data(&mut self, soroban_data: xdr::SorobanTransactionData) -> &mut Self {
         self.soroban_data = Some(soroban_data);
         self
@@ -184,10 +190,17 @@ impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
         };
         let vv = decode_address_to_muxed_account_fix_for_g_address(&account_id);
 
-        let tx_cond = if let Some(tb) = self.time_bounds.clone() {
-            xdr::Preconditions::Time(tb)
-        } else {
-            xdr::Preconditions::None
+        let tx_cond = match (&self.time_bounds, &self.ledger_bounds) {
+            (None, None) => xdr::Preconditions::None,
+            (Some(tb), None) => xdr::Preconditions::Time(tb.clone()),
+            (time_bounds, ledger_bounds) => xdr::Preconditions::V2(xdr::PreconditionsV2 {
+                time_bounds: time_bounds.as_ref().cloned(),
+                ledger_bounds: ledger_bounds.as_ref().cloned(),
+                min_seq_num: None,
+                min_seq_age: xdr::Duration(0),
+                min_seq_ledger_gap: 0,
+                extra_signers: xdr::VecM::default(),
+            }),
         };
         let envelope_type = if self.soroban_data.is_some() {
             xdr::EnvelopeType::Tx
@@ -218,7 +231,7 @@ impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
             sequence: Some(sequence_number),
             source: Some(account_id.to_string()),
             time_bounds: self.time_bounds.clone(),
-            ledger_bounds: None,
+            ledger_bounds: self.ledger_bounds.clone(),
             min_account_sequence: Some("0".to_string()),
             min_account_sequence_age: Some(0),
             min_account_sequence_ledger_gap: Some(0),
@@ -302,10 +315,17 @@ impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
         };
         let vv = decode_address_to_muxed_account_fix_for_g_address(&account_id);
 
-        let tx_cond = if let Some(tb) = self.time_bounds.clone() {
-            xdr::Preconditions::Time(tb)
-        } else {
-            xdr::Preconditions::None
+        let tx_cond = match (&self.time_bounds, &self.ledger_bounds) {
+            (None, None) => xdr::Preconditions::None,
+            (Some(tb), None) => xdr::Preconditions::Time(tb.clone()),
+            (time_bounds, ledger_bounds) => xdr::Preconditions::V2(xdr::PreconditionsV2 {
+                time_bounds: time_bounds.as_ref().cloned(),
+                ledger_bounds: ledger_bounds.as_ref().cloned(),
+                min_seq_num: None,
+                min_seq_age: xdr::Duration(0),
+                min_seq_ledger_gap: 0,
+                extra_signers: xdr::VecM::default(),
+            }),
         };
         let envelope_type = if self.soroban_data.is_some() {
             xdr::EnvelopeType::Tx
@@ -336,7 +356,7 @@ impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
             sequence: Some(next_sequence_number),
             source: Some(account_id.to_string()),
             time_bounds: self.time_bounds.clone(),
-            ledger_bounds: None,
+            ledger_bounds: self.ledger_bounds.clone(),
             min_account_sequence: Some("0".to_string()),
             min_account_sequence_age: Some(0),
             min_account_sequence_ledger_gap: Some(0),
@@ -550,6 +570,103 @@ mod tests {
         assert_eq!(
             transaction.time_bounds.as_ref().unwrap().max_time,
             timebounds.max_time
+        );
+    }
+
+    #[test]
+    fn constructs_native_payment_transaction_with_ledger_bounds() {
+        let mut source = Account::new(
+            "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ",
+            "0",
+        )
+        .unwrap();
+
+        let ledger_bounds = xdr::LedgerBounds {
+            min_ledger: 1000,
+            max_ledger: 2000,
+        };
+
+        let mut builder = TransactionBuilder::new(&mut source, Networks::testnet(), None);
+        builder
+            .fee(100_u32)
+            .add_operation(
+                Operation::new()
+                    .payment(
+                        "GDJJRRMBK4IWLEPJGIE6SXD2LP7REGZODU7WDC3I2D6MR37F4XSHBKX2",
+                        &Asset::native(),
+                        1000 * operation::ONE,
+                    )
+                    .unwrap(),
+            )
+            .set_ledger_bounds(ledger_bounds.clone())
+            .set_timeout(TIMEOUT_INFINITE)
+            .unwrap();
+
+        let transaction = builder.build();
+
+        assert_eq!(
+            transaction.ledger_bounds.as_ref().unwrap().min_ledger,
+            ledger_bounds.min_ledger
+        );
+        assert_eq!(
+            transaction.ledger_bounds.as_ref().unwrap().max_ledger,
+            ledger_bounds.max_ledger
+        );
+    }
+
+    #[test]
+    fn constructs_native_payment_transaction_with_time_and_ledger_bounds() {
+        let mut source = Account::new(
+            "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ",
+            "0",
+        )
+        .unwrap();
+
+        let timebounds = xdr::TimeBounds {
+            min_time: xdr::TimePoint(1455287522),
+            max_time: xdr::TimePoint(1455297545),
+        };
+
+        let ledger_bounds = xdr::LedgerBounds {
+            min_ledger: 1000,
+            max_ledger: 2000,
+        };
+
+        let mut builder =
+            TransactionBuilder::new(&mut source, Networks::testnet(), Some(timebounds.clone()));
+        builder
+            .fee(100_u32)
+            .add_operation(
+                Operation::new()
+                    .payment(
+                        "GDJJRRMBK4IWLEPJGIE6SXD2LP7REGZODU7WDC3I2D6MR37F4XSHBKX2",
+                        &Asset::native(),
+                        1000 * operation::ONE,
+                    )
+                    .unwrap(),
+            )
+            .set_ledger_bounds(ledger_bounds.clone());
+
+        let transaction = builder.build();
+
+        // Verify time bounds
+        assert_eq!(
+            transaction.time_bounds.as_ref().unwrap().min_time,
+            timebounds.min_time
+        );
+        assert_eq!(
+            transaction.time_bounds.as_ref().unwrap().max_time,
+            timebounds.max_time
+        );
+
+        // Verify ledger bounds
+        assert_eq!(
+            transaction.ledger_bounds.as_ref().unwrap().min_ledger,
+            ledger_bounds.min_ledger
+        );
+        assert_eq!(
+            transaction.ledger_bounds.as_ref().unwrap().max_ledger,
+            ledger_bounds.max_ledger
         );
     }
 
