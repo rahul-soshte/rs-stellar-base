@@ -52,6 +52,19 @@ pub trait TransactionBehavior {
 
 impl Transaction {
     fn to_tx(&self) -> xdr::Transaction {
+        let cond = match (&self.time_bounds, &self.ledger_bounds) {
+            (None, None) => xdr::Preconditions::None,
+            (Some(tb), None) => xdr::Preconditions::Time(tb.clone()),
+            (time_bounds, ledger_bounds) => xdr::Preconditions::V2(xdr::PreconditionsV2 {
+                time_bounds: time_bounds.clone(),
+                ledger_bounds: ledger_bounds.clone(),
+                min_seq_num: None,
+                min_seq_age: xdr::Duration(0),
+                min_seq_ledger_gap: 0,
+                extra_signers: xdr::VecM::default(),
+            }),
+        };
+
         match self.envelope_type {
             xdr::EnvelopeType::TxV0 => xdr::Transaction {
                 source_account: xdr::MuxedAccount::from_str(
@@ -66,10 +79,7 @@ impl Transaction {
                         .parse::<i64>()
                         .expect("Invalid sequence number"),
                 ),
-                cond: match &self.time_bounds {
-                    None => xdr::Preconditions::None,
-                    Some(time_bounds) => xdr::Preconditions::Time(time_bounds.clone()),
-                },
+                cond: cond.clone(),
                 memo: self.memo.clone().unwrap_or(xdr::Memo::None),
                 operations: self
                     .operations
@@ -92,10 +102,7 @@ impl Transaction {
                         .parse()
                         .expect("Invalid sequence number"),
                 ),
-                cond: match &self.time_bounds {
-                    None => xdr::Preconditions::None,
-                    Some(time_bounds) => xdr::Preconditions::Time(time_bounds.clone()),
-                },
+                cond,
                 memo: self.memo.clone().unwrap_or(xdr::Memo::None),
                 operations: self
                     .operations
