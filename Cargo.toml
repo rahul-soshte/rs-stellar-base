@@ -1,6 +1,6 @@
 [package]
 name = "stellar-baselib"
-version = "0.5.5"
+version = "0.5.6"
 edition = "2021"
 description = "A low level Rust library that offers a comprehensive set of functions for reading, writing, hashing, and signing primitive XDR constructs utilized in the Stellar network"
 license = "Apache-2.0"
