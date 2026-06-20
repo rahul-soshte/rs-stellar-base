@@ -5,9 +5,9 @@ use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 use stellar_strkey::ed25519::PublicKey;
-use stellar_xdr::curr::LedgerKey;
 use xdr::DecoratedSignature;
 use xdr::Limits;
+use xdr::LedgerKey;
 use xdr::SorobanTransactionData;
 
 use crate::account::Account;

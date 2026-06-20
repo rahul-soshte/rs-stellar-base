@@ -3,6 +3,8 @@
 //! for reading, writing, hashing, and signing primitive XDR constructs
 //! utilized in the Stellar network.
 //! It provides a nice abstraction for building and signing transactions
+/// Helpers for authorizing Soroban entries (CAP-0071, Protocol 27)
+pub mod authorize_entry;
 /// `Account` represents a single account in the Stellar network and its sequence number.
 pub mod account;
 /// `Address` represents a single address in the Stellar network.
@@ -34,11 +36,7 @@ pub mod utils;
 
 /// Re-exporting XDR from stellar-xdr
 pub mod xdr {
-    #[cfg(not(feature = "next"))]
-    pub use stellar_xdr::curr::*;
-
-    #[cfg(feature = "next")]
-    pub use stellar_xdr::next::*;
+    pub use stellar_xdr::*;
 }
 
 mod op_list;

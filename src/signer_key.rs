@@ -77,7 +77,7 @@ fn assert_panic<F: FnOnce(), S: AsRef<str>>(f: F, expected_msg: S) {
 }
 
 mod tests {
-    use xdr::{ReadXdr, WriteXdr};
+    use crate::xdr::{ReadXdr, WriteXdr};
 
     use super::*;
     #[derive(Debug)]
