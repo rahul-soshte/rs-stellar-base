@@ -1,6 +1,6 @@
 [package]
 name = "stellar-baselib"
-version = "0.5.8"
+version = "0.6.0"
 edition = "2021"
 description = "A low level Rust library that offers a comprehensive set of functions for reading, writing, hashing, and signing primitive XDR constructs utilized in the Stellar network"
 license = "Apache-2.0"
@@ -19,7 +19,7 @@ rand_core = { version = "0.9.3", default-features = true, features = [
 hex = "0.4.3"
 sha2 = "0.10.9"
 stellar-strkey = "0.0.15"
-stellar-xdr = { version = "27.0.0", default-features = true, features = [
+stellar-xdr = { version = "28.0.0", default-features = true, features = [
   "base64",
   "std",
   "serde",
@@ -44,4 +44,6 @@ hex-literal = "1.0.0"
 
 [features]
 default = []
-cap_0083 = ["stellar-xdr/cap_0083"]
+# CAP-0083 types are ungated in Protocol 28 XDR (always available); this
+# feature is kept as a no-op for backwards compatibility.
+cap_0083 = []

@@ -6,7 +6,7 @@
 
 A library that offers a comprehensive set of functions for reading, writing, hashing, and signing primitive XDR constructs utilized in the Stellar network. it provides a nice abstraction for building and signing transactions
 
-**This project is currently production and is compatible with Protocol 23 and you can use it for buidling and signing transactions that involve interacting with Soroban and also supports all stellar classic operations.**
+**This project is currently production and is compatible with Protocol 28 and you can use it for buidling and signing transactions that involve interacting with Soroban and also supports all stellar classic operations.**
 
 ## Quickstart
 
@@ -14,7 +14,7 @@ Add this to your Cargo.toml:
 
 ```toml
 [dependencies]
-stellar-baselib = "0.5.6"
+stellar-baselib = "0.6.0"
 ```
 
 And this to your code:

@@ -111,6 +111,74 @@ impl Operation {
         self.invoke_host_function(func, auth)
     }
 
+    /// Create a new contract from a CAP-85 external contract executable reference.
+    ///
+    /// Instead of a wasm hash, the new contract instance points to an executable owned by
+    /// another contract: `executable_owner` (a `C...` contract address) publishes the wasm
+    /// hash in its persistent storage under the `tag` entry. The `tag` is binary data
+    /// identifying the code being deployed; it is passed through undecoded and does not
+    /// need to be valid UTF-8.
+    ///
+    /// The `salt` and `deployer` are used to compute the contract_id pre-image of the newly
+    /// created contract, exactly as in [create_contract](Self::create_contract).
+    ///
+    /// If the contract has a `__constructor` method, you can provide the `constructor_args`,
+    /// this constructor will be invoked during the contract creation.
+    ///
+    /// Requires Protocol 28.
+    pub fn create_contract_from_external_ref(
+        &self,
+        deployer: &str,
+        executable_owner: &str,
+        tag: &[u8],
+        salt: Option<[u8; 32]>,
+        auth: Option<Vec<xdr::SorobanAuthorizationEntry>>,
+        constructor_args: Vec<xdr::ScVal>,
+    ) -> Result<xdr::Operation, operation::Error> {
+        let salt = match salt {
+            Some(s) => xdr::Uint256(s),
+            _ => xdr::Uint256(Self::get_salty()),
+        };
+
+        let address = Address::from_string(deployer)
+            .map_err(|_| operation::Error::InvalidField("deployer".into()))?
+            .to_sc_address()
+            .map_err(|_| operation::Error::InvalidField("deployer".into()))?;
+
+        // Only a contract can hold the tag entry that names the wasm, reject
+        // any other kind of address early.
+        let owner = Address::from_string(executable_owner)
+            .map_err(|_| operation::Error::InvalidField("executable_owner".into()))?
+            .to_sc_address()
+            .map_err(|_| operation::Error::InvalidField("executable_owner".into()))?;
+        if !matches!(owner, xdr::ScAddress::Contract(_)) {
+            return Err(operation::Error::InvalidField("executable_owner".into()));
+        }
+
+        let tag = xdr::ScString(
+            tag.to_vec()
+                .try_into()
+                .map_err(|_| operation::Error::InvalidField("tag".into()))?,
+        );
+
+        let constructor_args: xdr::VecM<xdr::ScVal> = constructor_args
+            .try_into()
+            .map_err(|_| operation::Error::InvalidField("constructor_args".into()))?;
+
+        let func = xdr::HostFunction::CreateContractV2(xdr::CreateContractArgsV2 {
+            contract_id_preimage: xdr::ContractIdPreimage::Address(
+                xdr::ContractIdPreimageFromAddress { address, salt },
+            ),
+            executable: xdr::ContractExecutable::ExternalRef(xdr::ContractExecutableExternalRef {
+                executable_owner: owner,
+                tag,
+            }),
+            constructor_args,
+        });
+
+        self.invoke_host_function(func, auth)
+    }
+
     /// Create a Stellar Asset Contract for the [Asset], this wraps a classic Stellar asset in
     /// Soroban.
     pub fn wrap_asset(
@@ -333,6 +401,62 @@ mod tests {
             return;
         }
         panic!("Fail")
+    }
+
+    #[test]
+    fn test_create_contract_from_external_ref() {
+        let deployer = Keypair::random().unwrap().public_key();
+        let owner = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+        // A binary, non-UTF-8 tag must pass through undecoded.
+        let tag = [0x00u8, 0xffu8, 0x80u8, 0x01u8];
+        let salt = Keypair::random().unwrap().raw_pubkey();
+
+        let op = Operation::new()
+            .create_contract_from_external_ref(&deployer, owner, &tag, Some(salt), None, [].into())
+            .unwrap();
+
+        if let xdr::OperationBody::InvokeHostFunction(xdr::InvokeHostFunctionOp {
+            host_function:
+                xdr::HostFunction::CreateContractV2(xdr::CreateContractArgsV2 {
+                    contract_id_preimage:
+                        xdr::ContractIdPreimage::Address(xdr::ContractIdPreimageFromAddress {
+                            address,
+                            salt: actual_salt,
+                        }),
+                    executable: xdr::ContractExecutable::ExternalRef(ext_ref),
+                    ..
+                }),
+            ..
+        }) = op.body
+        {
+            assert_eq!(address, xdr::ScAddress::from_str(&deployer).unwrap());
+            assert_eq!(actual_salt, xdr::Uint256(salt));
+            assert_eq!(ext_ref.executable_owner, xdr::ScAddress::from_str(owner).unwrap());
+            assert_eq!(ext_ref.tag.0.as_slice(), &tag);
+            return;
+        }
+        panic!("Fail")
+    }
+
+    #[test]
+    fn test_create_contract_from_external_ref_rejects_account_owner() {
+        let deployer = Keypair::random().unwrap().public_key();
+        // An account (G...) cannot own an external executable.
+        let owner = Keypair::random().unwrap().public_key();
+
+        let op = Operation::new().create_contract_from_external_ref(
+            &deployer,
+            &owner,
+            b"tag",
+            None,
+            None,
+            [].into(),
+        );
+
+        assert_eq!(
+            op.err(),
+            Some(operation::Error::InvalidField("executable_owner".into()))
+        );
     }
 
     #[test]
