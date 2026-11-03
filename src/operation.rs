@@ -137,7 +137,9 @@ fn convert_xdr_signer_key_to_object(
             let ed25519_public_key = PublicKey::from_string(signer_key.to_string().as_str())
                 .unwrap()
                 .to_string();
-            Ok(SignerKeyAttrs::Ed25519PublicKey(ed25519_public_key))
+            Ok(SignerKeyAttrs::Ed25519PublicKey(
+                ed25519_public_key.as_str().to_owned(),
+            ))
         }
         xdr::SignerKeyType::PreAuthTx => Ok(SignerKeyAttrs::PreAuthTx(
             signer_key.to_xdr_base64(xdr::Limits::none()).unwrap(),

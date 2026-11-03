@@ -6,8 +6,8 @@ use std::fmt;
 use std::str::FromStr;
 use stellar_strkey::ed25519::PublicKey;
 use xdr::DecoratedSignature;
-use xdr::Limits;
 use xdr::LedgerKey;
+use xdr::Limits;
 use xdr::SorobanTransactionData;
 
 use crate::account::Account;
@@ -198,7 +198,9 @@ impl TransactionBehavior for Transaction {
                     stellar_strkey::Strkey::PublicKeyEd25519(PublicKey(
                         tx_v0_env.tx.source_account_ed25519.0,
                     ))
-                    .to_string(),
+                    .to_string()
+                    .as_str()
+                    .to_owned(),
                 ),
                 time_bounds: tx_v0_env.tx.time_bounds,
                 ledger_bounds: None,

@@ -510,11 +510,8 @@ mod tests {
     #[test]
     fn test_set_signer_payload() {
         let payload = "payload".as_bytes();
-        let signer = Strkey::SignedPayloadEd25519(SignedPayload {
-            ed25519: [3; 32],
-            payload: payload.to_vec(),
-        })
-        .to_string();
+        let signer =
+            Strkey::SignedPayloadEd25519(SignedPayload::new([3; 32], payload).unwrap()).to_string();
         let weight = 100;
         let op = Operation::new().set_signer(&signer, weight).unwrap();
         if let xdr::OperationBody::SetOptions(xdr::SetOptionsOp {

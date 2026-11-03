@@ -64,7 +64,7 @@ impl ContractBehavior for Contracts {
     }
 
     fn contract_id(&self) -> String {
-        stellar_strkey::Contract(self.get_id()).to_string()
+        format!("{}", stellar_strkey::Contract(self.get_id()))
     }
 
     fn to_string(&self) -> String {

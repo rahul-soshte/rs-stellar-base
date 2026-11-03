@@ -221,7 +221,12 @@ impl KeypairBehavior for Keypair {
     fn secret_key(&self) -> Result<String, Box<dyn Error>> {
         match &self.secret_seed {
             None => Err("no secret_key available".into()),
-            Some(s) => Ok(PrivateKey::from_payload(s).unwrap().clone().to_string()),
+            Some(s) => Ok(
+                stellar_strkey::Unredacted(&PrivateKey::from_payload(s).unwrap())
+                    .to_string()
+                    .as_str()
+                    .to_owned(),
+            ),
         }
     }
 
@@ -230,6 +235,8 @@ impl KeypairBehavior for Keypair {
         PublicKey::from_payload(&self.public_key)
             .unwrap()
             .to_string()
+            .as_str()
+            .to_owned()
     }
 
     /// returns `true` if the keypair obj contains secret key and can sign.

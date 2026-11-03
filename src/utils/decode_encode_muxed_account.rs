@@ -50,7 +50,7 @@ pub fn encode_muxed_account_to_address(muxed_account: &xdr::MuxedAccount) -> Str
         _ => panic!("Expected Ed25519 variant"),
     };
 
-    PublicKey::from_payload(&inner_value.0).unwrap().to_string()
+    format!("{}", PublicKey::from_payload(&inner_value.0).unwrap())
 }
 pub fn decode_address_fully_to_muxed_account(address: &str) -> xdr::MuxedAccount {
     let binding = MuxedAccount::from_str(address).unwrap();
@@ -100,5 +100,5 @@ pub fn extract_base_address(address: &str) -> Result<String, Box<dyn std::error:
     let muxed_account = decode_address_to_muxed_account(address);
     let ed25519_key = muxed_account.ed25519;
     let encoded_ed25519 = PublicKey::from_payload(&ed25519_key).unwrap();
-    Ok(encoded_ed25519.to_string())
+    Ok(format!("{encoded_ed25519}"))
 }

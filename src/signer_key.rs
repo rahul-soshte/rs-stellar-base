@@ -26,8 +26,8 @@ impl SignerKeyBehavior for SignerKey {
         match val.unwrap() {
             stellar_strkey::Strkey::SignedPayloadEd25519(x) => {
                 XDRSignerKey::Ed25519SignedPayload(SignerKeyEd25519SignedPayload {
-                    ed25519: xdr::Uint256(x.ed25519),
-                    payload: x.payload.try_into().unwrap(),
+                    ed25519: xdr::Uint256(*x.ed25519()),
+                    payload: x.payload().try_into().unwrap(),
                 })
             }
             stellar_strkey::Strkey::PublicKeyEd25519(x) => XDRSignerKey::Ed25519(xdr::Uint256(x.0)),
@@ -42,17 +42,18 @@ impl SignerKeyBehavior for SignerKey {
             XDRSignerKey::Ed25519(x) => {
                 stellar_strkey::Strkey::PublicKeyEd25519(PublicKey::from_payload(&x.0).unwrap())
                     .to_string()
+                    .as_str()
+                    .to_owned()
             }
             XDRSignerKey::PreAuthTx(x) => {
-                stellar_strkey::Strkey::PreAuthTx(PreAuthTx(x.0)).to_string()
+                format!("{}", stellar_strkey::Strkey::PreAuthTx(PreAuthTx(x.0)))
             }
-            XDRSignerKey::HashX(x) => stellar_strkey::Strkey::HashX(HashX(x.0)).to_string(),
+            XDRSignerKey::HashX(x) => format!("{}", stellar_strkey::Strkey::HashX(HashX(x.0))),
             XDRSignerKey::Ed25519SignedPayload(x) => {
-                stellar_strkey::Strkey::SignedPayloadEd25519(SignedPayload {
-                    ed25519: x.ed25519.0,
-                    payload: x.payload.clone().into_vec(),
-                })
-                .to_string()
+                format!(
+                    "{}",
+                    SignedPayload::new(x.ed25519.0, x.payload.as_slice()).unwrap()
+                )
             }
         }
     }

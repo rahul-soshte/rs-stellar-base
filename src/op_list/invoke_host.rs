@@ -52,6 +52,10 @@ impl Operation {
             .to_sc_address()
             .map_err(|_| operation::Error::InvalidField("contract_id".into()))?;
 
+        if !matches!(contract_address, xdr::ScAddress::Contract(_)) {
+            return Err(operation::Error::InvalidField("contract_id".into()));
+        }
+
         let function_name = xdr::ScSymbol(
             method
                 .try_into()
@@ -95,6 +99,13 @@ impl Operation {
             .map_err(|_| operation::Error::InvalidField("deployer".into()))?
             .to_sc_address()
             .map_err(|_| operation::Error::InvalidField("deployer".into()))?;
+
+        if matches!(
+            address,
+            xdr::ScAddress::MuxedAccount(_) | xdr::ScAddress::MuxedContract(_)
+        ) {
+            return Err(operation::Error::InvalidField("deployer".into()));
+        }
 
         let constructor_args: xdr::VecM<xdr::ScVal> = constructor_args
             .try_into()
@@ -144,6 +155,13 @@ impl Operation {
             .map_err(|_| operation::Error::InvalidField("deployer".into()))?
             .to_sc_address()
             .map_err(|_| operation::Error::InvalidField("deployer".into()))?;
+
+        if matches!(
+            address,
+            xdr::ScAddress::MuxedAccount(_) | xdr::ScAddress::MuxedContract(_)
+        ) {
+            return Err(operation::Error::InvalidField("deployer".into()));
+        }
 
         // Only a contract can hold the tag entry that names the wasm, reject
         // any other kind of address early.
@@ -229,6 +247,26 @@ mod tests {
     use crate::xdr::WriteXdr;
 
     use super::*;
+
+    #[test]
+    fn test_reject_muxed_contract_target_and_deployer() {
+        let address = "WA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAAWWC";
+        let op = Operation::new();
+        assert!(op.invoke_contract(address, "hello", vec![], None).is_err());
+        assert!(op
+            .create_contract(address, [0; 32], Some([0; 32]), None, vec![])
+            .is_err());
+        assert!(op
+            .create_contract_from_external_ref(
+                address,
+                "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE",
+                b"tag",
+                Some([0; 32]),
+                None,
+                vec![],
+            )
+            .is_err());
+    }
 
     #[test]
     fn test_invoke_host_function() {
@@ -431,7 +469,10 @@ mod tests {
         {
             assert_eq!(address, xdr::ScAddress::from_str(&deployer).unwrap());
             assert_eq!(actual_salt, xdr::Uint256(salt));
-            assert_eq!(ext_ref.executable_owner, xdr::ScAddress::from_str(owner).unwrap());
+            assert_eq!(
+                ext_ref.executable_owner,
+                xdr::ScAddress::from_str(owner).unwrap()
+            );
             assert_eq!(ext_ref.tag.0.as_slice(), &tag);
             return;
         }

@@ -35,15 +35,15 @@ impl Operation {
                 xdr::SignerKey::PreAuthTx(xdr::Uint256(key))
             }
             Strkey::HashX(stellar_strkey::HashX(key)) => xdr::SignerKey::HashX(xdr::Uint256(key)),
-            Strkey::SignedPayloadEd25519(stellar_strkey::ed25519::SignedPayload {
-                ed25519,
-                payload,
-            }) => xdr::SignerKey::Ed25519SignedPayload(xdr::SignerKeyEd25519SignedPayload {
-                ed25519: xdr::Uint256(ed25519),
-                payload: payload
-                    .try_into()
-                    .map_err(|_| operation::Error::InvalidField("signer".into()))?,
-            }),
+            Strkey::SignedPayloadEd25519(signer) => {
+                xdr::SignerKey::Ed25519SignedPayload(xdr::SignerKeyEd25519SignedPayload {
+                    ed25519: xdr::Uint256(*signer.ed25519()),
+                    payload: signer
+                        .payload()
+                        .try_into()
+                        .map_err(|_| operation::Error::InvalidField("signer".into()))?,
+                })
+            }
             _ => return Err(operation::Error::InvalidField("signer".into())),
         };
 
@@ -213,10 +213,13 @@ mod tests {
         let signer = Keypair::random().unwrap();
         let signed_payload = signer.sign_payload_decorated(data);
 
-        let payload = Strkey::SignedPayloadEd25519(SignedPayload {
-            ed25519: *signer.raw_public_key().last_chunk::<32>().unwrap(),
-            payload: signed_payload.signature.to_vec(),
-        })
+        let payload = Strkey::SignedPayloadEd25519(
+            SignedPayload::new(
+                *signer.raw_public_key().last_chunk::<32>().unwrap(),
+                signed_payload.signature.as_slice(),
+            )
+            .unwrap(),
+        )
         .to_string();
 
         let op = Operation::with_source(&a1)

@@ -6,7 +6,7 @@
 
 A library that offers a comprehensive set of functions for reading, writing, hashing, and signing primitive XDR constructs utilized in the Stellar network. it provides a nice abstraction for building and signing transactions
 
-**This project is currently production and is compatible with Protocol 28 and you can use it for buidling and signing transactions that involve interacting with Soroban and also supports all stellar classic operations.**
+**This project is currently production and is compatible with Protocol 30 and you can use it for buidling and signing transactions that involve interacting with Soroban and also supports all stellar classic operations.**
 
 ## Quickstart
 
@@ -22,6 +22,12 @@ And this to your code:
 ```rust
 use stellar_baselib::*;
 ```
+
+## Protocol 30
+
+Uses `stellar-xdr 30` and `stellar-strkey 1`. `Address` supports muxed contract
+addresses (`W...`) for muxed address parameters. Ledger close-time fields and
+transaction time bounds remain in seconds.
 
 ## How to run tests
 

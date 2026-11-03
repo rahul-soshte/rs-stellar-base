@@ -47,7 +47,7 @@ impl AccountBehavior for Account {
 
     /// Returns the account identifier
     fn account_id(&self) -> String {
-        PublicKey(self.account_id).to_string()
+        format!("{}", PublicKey(self.account_id))
     }
 
     /// Returns the sequence number
