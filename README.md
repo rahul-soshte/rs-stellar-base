@@ -14,7 +14,7 @@ Add this to your Cargo.toml:
 
 ```toml
 [dependencies]
-stellar-baselib = "0.6.0"
+stellar-baselib = "0.7.0"
 ```
 
 And this to your code:
@@ -22,6 +22,13 @@ And this to your code:
 ```rust
 use stellar_baselib::*;
 ```
+
+## Protocol Compatibility
+
+| `stellar-baselib` version | Stellar Protocol Number | `stellar-xdr` | `stellar-strkey` |
+| ------------------------- | ----------------------- | ------------- | ---------------- |
+| `0.7.x`                   | Protocol 30             | `30.0.0`      | `1.0.0`          |
+| `0.6.x`                   | Protocol 28             | `28.0.0`      | `0.0.15`         |
 
 ## Protocol 30
 
