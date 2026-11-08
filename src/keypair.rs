@@ -18,6 +18,18 @@ use stellar_strkey::{
     Strkey,
 };
 
+/// The fixed prefix prepended to every message before hashing and signing, as
+/// defined by [SEP-53](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0053.md).
+pub const SEP53_MESSAGE_PREFIX: &str = "Stellar Signed Message:\n";
+
+/// Computes the SEP-53 message hash: `SHA-256("Stellar Signed Message:\n" + message)`.
+fn sep53_message_hash(message: &[u8]) -> [u8; 32] {
+    let mut payload = Vec::with_capacity(SEP53_MESSAGE_PREFIX.len() + message.len());
+    payload.extend_from_slice(SEP53_MESSAGE_PREFIX.as_bytes());
+    payload.extend_from_slice(message);
+    Sha256Hasher::hash(payload)
+}
+
 #[derive(Debug, Clone)]
 pub struct Keypair {
     public_key: Vec<u8>,
@@ -110,6 +122,44 @@ pub trait KeypairBehavior {
 
     // Returns the raw decorated signature (hint+sig) for a signed payload signer
     fn sign_payload_decorated(&self, data: &[u8]) -> xdr::DecoratedSignature;
+
+    /// Signs an arbitrary message following
+    /// [SEP-53](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0053.md).
+    ///
+    /// The message is prefixed with `"Stellar Signed Message:\n"`, hashed with
+    /// SHA-256, and the hash is signed with this keypair's ed25519 secret key.
+    /// A `&str` / `String` is signed as its UTF-8 bytes; a byte slice is signed
+    /// as-is. Returns the 64-byte signature.
+    ///
+    /// Fails if this keypair has no secret key.
+    ///
+    /// ```
+    /// use stellar_baselib::keypair::{Keypair, KeypairBehavior};
+    ///
+    /// let kp = Keypair::from_secret("SAKICEVQLYWGSOJS4WW7HZJWAHZVEEBS527LHK5V4MLJALYKICQCJXMW").unwrap();
+    /// let signature = kp.sign_message("Hello, World!").unwrap();
+    ///
+    /// let verifier = Keypair::from_public_key(&kp.public_key()).unwrap();
+    /// assert!(verifier.verify_message("Hello, World!", &signature));
+    /// ```
+    fn sign_message<M: AsRef<[u8]>>(&self, message: M) -> Result<Vec<u8>, Box<dyn Error>>
+    where
+        Self: Sized,
+    {
+        self.sign(&sep53_message_hash(message.as_ref()))
+    }
+
+    /// Verifies a [SEP-53](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0053.md)
+    /// signed message against this keypair's public key.
+    ///
+    /// `message` must be the original message without the prefix. Returns
+    /// `false` for any invalid signature, including one that is not 64 bytes.
+    fn verify_message<M: AsRef<[u8]>>(&self, message: M, signature: &[u8]) -> bool
+    where
+        Self: Sized,
+    {
+        self.verify(&sep53_message_hash(message.as_ref()), signature)
+    }
 }
 
 impl KeypairBehavior for Keypair {
@@ -485,5 +535,106 @@ mod tests {
         let message = "test post please ignore".as_bytes();
         let sign: xdr::DecoratedSignature = kp.sign_decorated(message);
         assert_eq!(sign.hint.0.to_vec(), vec![0x0B, 0xFA, 0xD1, 0x34]);
+    }
+
+    // SEP-53 test cases, taken verbatim from
+    // https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0053.md#test-cases
+    const SEP53_SEED: &str = "SAKICEVQLYWGSOJS4WW7HZJWAHZVEEBS527LHK5V4MLJALYKICQCJXMW";
+    const SEP53_ADDRESS: &str = "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L";
+
+    fn sep53_cases() -> Vec<(Vec<u8>, [u8; 64])> {
+        vec![
+            (
+                "Hello, World!".as_bytes().to_vec(),
+                hex!("7cee5d6d885752104c85eea421dfdcb95abf01f1271d11c4bec3fcbd7874dccd6e2e98b97b8eb23b643cac4073bb77de5d07b0710139180ae9f3cbba78f2ba04"),
+            ),
+            (
+                "こんにちは、世界！".as_bytes().to_vec(),
+                hex!("083536eb95ecf32dce59b07fe7a1fd8cf814b2ce46f40d2a16e4ea1f6cecd980e04e6fbef9d21f98011c785a81edb85f3776a6e7d942b435eb0adc07da4d4604"),
+            ),
+            (
+                // base64 "2zZDP1sa1BVBfLP7TeeMk3sUbaxAkUhBhDiNdrksaFo="
+                hex!("db36433f5b1ad415417cb3fb4de78c937b146dac4091484184388d76b92c685a").to_vec(),
+                hex!("540d7eee179f370bf634a49c1fa9fe4a58e3d7990b0207be336c04edfcc539ff8bd0c31bb2c0359b07c9651cb2ae104e4504657b5d17d43c69c7e50e23811b0d"),
+            ),
+        ]
+    }
+
+    #[test]
+    fn test_sep53_sign_message_matches_spec() {
+        let kp = Keypair::from_secret(SEP53_SEED).unwrap();
+        assert_eq!(kp.public_key(), SEP53_ADDRESS);
+        for (message, expected) in sep53_cases() {
+            assert_eq!(kp.sign_message(&message).unwrap(), expected.to_vec());
+        }
+    }
+
+    #[test]
+    fn test_sep53_verify_message_matches_spec() {
+        let verifier = Keypair::from_public_key(SEP53_ADDRESS).unwrap();
+        for (message, signature) in sep53_cases() {
+            assert!(verifier.verify_message(&message, &signature));
+        }
+    }
+
+    #[test]
+    fn test_sep53_str_and_bytes_are_equivalent() {
+        let kp = Keypair::from_secret(SEP53_SEED).unwrap();
+        let from_str = kp.sign_message("こんにちは、世界！").unwrap();
+        let from_string = kp.sign_message(String::from("こんにちは、世界！")).unwrap();
+        let from_bytes = kp.sign_message("こんにちは、世界！".as_bytes()).unwrap();
+        assert_eq!(from_str, from_bytes);
+        assert_eq!(from_string, from_bytes);
+    }
+
+    #[test]
+    fn test_sep53_round_trip_random_keypair() {
+        let kp = Keypair::random().unwrap();
+        let signature = kp.sign_message(b"\x00\xff binary \x01").unwrap();
+        assert_eq!(signature.len(), 64);
+        assert!(kp.verify_message(b"\x00\xff binary \x01", &signature));
+    }
+
+    #[test]
+    fn test_sep53_signature_is_not_raw_message_signature() {
+        // The prefix must be applied: a plain ed25519 signature over the message
+        // is not a valid SEP-53 signature, and vice versa.
+        let kp = Keypair::from_secret(SEP53_SEED).unwrap();
+        let raw = kp.sign(b"Hello, World!").unwrap();
+        assert!(!kp.verify_message("Hello, World!", &raw));
+        let sep53 = kp.sign_message("Hello, World!").unwrap();
+        assert!(!kp.verify(b"Hello, World!", &sep53));
+    }
+
+    #[test]
+    fn test_sep53_verify_message_rejects_invalid() {
+        let verifier = Keypair::from_public_key(SEP53_ADDRESS).unwrap();
+        let (message, signature) = sep53_cases().remove(0);
+
+        // different message
+        assert!(!verifier.verify_message("Hello, World?", &signature));
+
+        // tampered signature
+        let mut tampered = signature;
+        tampered[0] ^= 0x01;
+        assert!(!verifier.verify_message(&message, &tampered));
+
+        // wrong public key
+        let other = Keypair::random().unwrap();
+        assert!(!other.verify_message(&message, &signature));
+
+        // malformed signature lengths must return false, not read out of bounds
+        assert!(!verifier.verify_message(&message, &[]));
+        assert!(!verifier.verify_message(&message, &signature[..63]));
+        let mut too_long = signature.to_vec();
+        too_long.push(0);
+        assert!(!verifier.verify_message(&message, &too_long));
+    }
+
+    #[test]
+    fn test_sep53_sign_message_requires_secret_key() {
+        let verifier = Keypair::from_public_key(SEP53_ADDRESS).unwrap();
+        let err = verifier.sign_message("Hello, World!").unwrap_err();
+        assert_eq!(err.to_string(), "cannot sign, no secret_key available");
     }
 }

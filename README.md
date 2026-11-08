@@ -36,6 +36,29 @@ Uses `stellar-xdr 30` and `stellar-strkey 1`. `Address` supports muxed contract
 addresses (`W...`) for muxed address parameters. Ledger close-time fields and
 transaction time bounds remain in seconds.
 
+## Signing and verifying messages (SEP-53)
+
+`Keypair` signs and verifies arbitrary off-chain messages as defined in
+[SEP-53](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0053.md),
+matching `Keypair.signMessage` / `Keypair.verifyMessage` in the JS and Java SDKs.
+The message is prefixed with `"Stellar Signed Message:\n"`, hashed with SHA-256
+and signed with ed25519. Strings are signed as UTF-8; byte slices as-is.
+
+```rust
+use stellar_baselib::keypair::{Keypair, KeypairBehavior};
+
+let signer = Keypair::from_secret("SAKICEVQLYWGSOJS4WW7HZJWAHZVEEBS527LHK5V4MLJALYKICQCJXMW").unwrap();
+let signature = signer.sign_message("Hello, World!").unwrap(); // 64 bytes
+
+// A service only needs the account's public key to check the claim.
+let verifier = Keypair::from_public_key("GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L").unwrap();
+assert!(verifier.verify_message("Hello, World!", &signature));
+```
+
+A valid signature proves control of the key, not of the account: an account
+with multiple signers, or whose master key weight is 0, is not controlled by
+this key alone.
+
 ## How to run tests
 
 ```bash

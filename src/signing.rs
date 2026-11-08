@@ -5,7 +5,14 @@ pub fn sign(data: &[u8], secret_key: &[u8]) -> [u8; 64] {
     signing_impl::sign(data, secret_key)
 }
 /// Verify the signature
+///
+/// Returns `false` (rather than reading out of bounds) when `signature` is not
+/// 64 bytes or `public_key` is not 32 bytes, since both are commonly supplied by
+/// untrusted callers.
 pub fn verify(data: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
+    if signature.len() != 64 || public_key.len() != 32 {
+        return false;
+    }
     signing_impl::verify(data, signature, public_key)
 }
 
