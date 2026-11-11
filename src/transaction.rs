@@ -147,27 +147,46 @@ impl TransactionBehavior for Transaction {
     }
 
     fn to_envelope(&self) -> Result<xdr::TransactionEnvelope, Box<dyn Error>> {
-        let raw_tx = self.to_tx().to_xdr_base64(xdr::Limits::none()).unwrap();
-
-        let mut signatures =
-            xdr::VecM::<DecoratedSignature, 20>::try_from(self.signatures.clone()).unwrap(); // Make a copy of the signatures
+        let signatures = xdr::VecM::<DecoratedSignature, 20>::try_from(self.signatures.clone())
+            .map_err(|_| "a transaction envelope holds at most 20 signatures")?;
 
         let envelope = match self.envelope_type {
             xdr::EnvelopeType::TxV0 => {
-                let transaction_v0 = xdr::TransactionV0Envelope {
-                    tx: xdr::TransactionV0::from_xdr_base64(&raw_tx, xdr::Limits::none()).unwrap(), // Make a copy of tx
-                    signatures,
+                // Build the v0 struct field by field: a v1 `Transaction` and a
+                // `TransactionV0` have different XDR layouts, so one can't be decoded
+                // from the other's bytes.
+                let tx = self.to_tx();
+                let source_account_ed25519 = match tx.source_account {
+                    xdr::MuxedAccount::Ed25519(key) => key,
+                    xdr::MuxedAccount::MuxedEd25519(_) => {
+                        return Err("a TxV0 transaction cannot have a muxed source account".into())
+                    }
                 };
-                xdr::TransactionEnvelope::TxV0(transaction_v0)
+                let time_bounds = match tx.cond {
+                    xdr::Preconditions::None => None,
+                    xdr::Preconditions::Time(tb) => Some(tb),
+                    xdr::Preconditions::V2(_) => {
+                        return Err("a TxV0 transaction cannot have V2 preconditions".into())
+                    }
+                };
+                xdr::TransactionEnvelope::TxV0(xdr::TransactionV0Envelope {
+                    tx: xdr::TransactionV0 {
+                        source_account_ed25519,
+                        fee: tx.fee,
+                        seq_num: tx.seq_num,
+                        time_bounds,
+                        memo: tx.memo,
+                        operations: tx.operations,
+                        ext: xdr::TransactionV0Ext::V0,
+                    },
+                    signatures,
+                })
             }
 
-            xdr::EnvelopeType::Tx => {
-                let transaction_v1 = xdr::TransactionV1Envelope {
-                    tx: xdr::Transaction::from_xdr_base64(&raw_tx, xdr::Limits::none()).unwrap(), // Make a copy of tx
-                    signatures,
-                };
-                xdr::TransactionEnvelope::Tx(transaction_v1)
-            }
+            xdr::EnvelopeType::Tx => xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+                tx: self.to_tx(),
+                signatures,
+            }),
             _ => {
                 return Err(format!(
                     "Invalid TransactionEnvelope: expected an envelopeTypeTxV0 or envelopeTypeTx but received an {:?}.",
@@ -180,8 +199,32 @@ impl TransactionBehavior for Transaction {
         Ok(envelope)
     }
 
+    /// Parse a base64 XDR transaction envelope.
+    ///
+    /// For a fee-bump (`TxFeeBump`) envelope this returns the **inner** transaction.
+    /// That transaction's [`hash`](TransactionBehavior::hash) is the inner hash, and its
+    /// signatures are the inner signatures. To keep the fee bump itself, parse with
+    /// [`GenericTransaction::from_xdr_envelope`] or
+    /// [`FeeBumpTransaction::from_xdr_envelope`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `xdr` is not a valid base64 XDR envelope.
+    /// [`GenericTransaction::from_xdr_envelope`] returns an error instead.
+    ///
+    /// [`GenericTransaction::from_xdr_envelope`]: crate::fee_bump_transaction::GenericTransaction::from_xdr_envelope
+    /// [`FeeBumpTransaction::from_xdr_envelope`]: crate::fee_bump_transaction::FeeBumpTransaction::from_xdr_envelope
     fn from_xdr_envelope(xdr: &str, network: &str) -> Self {
-        let tx_env = xdr::TransactionEnvelope::from_xdr_base64(xdr, Limits::none()).unwrap();
+        let tx_env = xdr::TransactionEnvelope::from_xdr_base64(xdr, Limits::none())
+            .expect("invalid transaction envelope XDR");
+        Self::from_envelope(tx_env, network)
+    }
+}
+
+impl Transaction {
+    /// Build from a decoded envelope. A fee bump yields its inner transaction (see
+    /// [`TransactionBehavior::from_xdr_envelope`]).
+    pub(crate) fn from_envelope(tx_env: xdr::TransactionEnvelope, network: &str) -> Self {
         let envelope_type = tx_env.discriminant();
 
         match tx_env {
@@ -255,10 +298,16 @@ impl TransactionBehavior for Transaction {
                     extra_signers: None,
                     operations: Some(tx_env.tx.operations.to_vec()),
                     hash: None,
-                    soroban_data: None,
+                    soroban_data: match tx_env.tx.ext {
+                        xdr::TransactionExt::V1(data) => Some(data),
+                        xdr::TransactionExt::V0 => None,
+                    },
                 }
             }
-            _ => panic!("Invalid envelope type"),
+            xdr::TransactionEnvelope::TxFeeBump(fee_bump_env) => {
+                let xdr::FeeBumpTransactionInnerTx::Tx(inner) = fee_bump_env.tx.inner_tx;
+                Self::from_envelope(xdr::TransactionEnvelope::Tx(inner), network)
+            }
         }
     }
 }
