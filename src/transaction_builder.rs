@@ -8,6 +8,7 @@ use serde_json::from_str;
 
 use crate::account::Account;
 use crate::account::AccountBehavior;
+use crate::fee_bump_transaction::{FeeBumpError, FeeBumpTransaction, GenericTransaction};
 use crate::hashing::Sha256Hasher;
 use crate::keypair::Keypair;
 use crate::transaction::Transaction;
@@ -61,6 +62,34 @@ pub trait TransactionBuilderBehavior<'a> {
 }
 
 pub const TIMEOUT_INFINITE: i64 = 0;
+
+/// Minimum base fee per operation, in stroops, that the network accepts.
+pub const BASE_FEE: u32 = 100;
+
+impl TransactionBuilder<'_> {
+    /// Wrap a signed transaction in a fee bump paid by `fee_source`.
+    ///
+    /// This is the same as [`FeeBumpTransaction::new`], which documents the fee rules.
+    /// It is here to match `TransactionBuilder.buildFeeBumpTransaction` in the JS SDK.
+    pub fn build_fee_bump_transaction(
+        fee_source: &str,
+        base_fee: i64,
+        inner_tx: &Transaction,
+    ) -> Result<FeeBumpTransaction, FeeBumpError> {
+        FeeBumpTransaction::new(fee_source, base_fee, inner_tx)
+    }
+
+    /// Parse a base64 XDR envelope of any kind, regular or fee bump.
+    ///
+    /// This is the same as [`GenericTransaction::from_xdr_envelope`]. It is here to match
+    /// `TransactionBuilder.fromXDR` in the JS SDK.
+    pub fn from_xdr(
+        xdr: &str,
+        network_passphrase: &str,
+    ) -> Result<GenericTransaction, FeeBumpError> {
+        GenericTransaction::from_xdr_envelope(xdr, network_passphrase)
+    }
+}
 
 impl<'a> TransactionBuilderBehavior<'a> for TransactionBuilder<'a> {
     fn new(

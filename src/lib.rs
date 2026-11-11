@@ -15,6 +15,9 @@ pub mod asset;
 pub mod claimant;
 /// `Contract` represents a single contract in the Stellar network
 pub mod contract;
+/// Fee-bump transactions (CAP-15), and [`GenericTransaction`](fee_bump_transaction::GenericTransaction)
+/// for parsing an envelope of either kind
+pub mod fee_bump_transaction;
 pub mod get_liquidity_pool;
 pub mod hashing;
 pub mod keypair;
