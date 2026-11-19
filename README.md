@@ -23,6 +23,39 @@ And this to your code:
 use stellar_baselib::*;
 ```
 
+## Envelope parsing migration (unreleased)
+
+`Transaction::from_xdr_envelope` now returns
+`Result<ParsedTransaction, TransactionError>` instead of `Transaction`. It accepts
+V0, V1 and fee-bump envelopes, and returns an error for invalid base64/XDR rather
+than panicking.
+
+```rust
+use stellar_baselib::transaction::{ParsedTransaction, Transaction, TransactionBehavior};
+
+# fn read(xdr: &str, network: &str) -> Result<(), Box<dyn std::error::Error>> {
+match Transaction::from_xdr_envelope(xdr, network)? {
+    ParsedTransaction::Transaction(tx) => println!("Fee: {}", tx.fee),
+    ParsedTransaction::FeeBump(tx) => {
+        println!("Outer fee: {}", tx.envelope().tx.fee);
+        let inner = tx.inner_transaction();
+        println!("Inner fee: {}", inner.fee);
+    }
+}
+# Ok(())
+# }
+```
+
+Callers that only accept ordinary transactions can use
+`Transaction::from_xdr_envelope(xdr, network)?.into_transaction()?`; fee bumps
+then produce `TransactionError::UnexpectedFeeBump`, rather than being silently
+unwrapped. Fee-bump parsing preserves the complete signed XDR envelope; building,
+signing and submission support are separate follow-up work.
+
+Parsed V2 preconditions now retain sequence age as `Option<u64>` and extra signers
+as `Option<Vec<xdr::SignerKey>>`, matching their protocol types. Minimum sequence
+numbers are decimal strings, consistent with the transaction sequence field.
+
 ## Protocol Compatibility
 
 | `stellar-baselib` version | Stellar Protocol Number | `stellar-xdr` | `stellar-strkey` |

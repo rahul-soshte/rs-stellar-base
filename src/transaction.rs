@@ -11,12 +11,61 @@ use xdr::Limits;
 use xdr::SorobanTransactionData;
 
 use crate::account::Account;
+use crate::fee_bump_transaction::FeeBumpTransaction;
 use crate::hashing::Sha256Hasher;
 use crate::keypair::Keypair;
 use crate::keypair::KeypairBehavior;
 use crate::xdr;
 use crate::xdr::ReadXdr;
 use crate::xdr::WriteXdr;
+
+/// A decoded transaction envelope of any supported transaction type.
+#[derive(Debug, Clone)]
+pub enum ParsedTransaction {
+    /// An ordinary V0 or V1 transaction.
+    Transaction(Transaction),
+    /// A fee-bump transaction containing a signed V1 transaction.
+    FeeBump(FeeBumpTransaction),
+}
+
+/// Errors decoding or selecting a transaction envelope.
+#[derive(Debug)]
+pub enum TransactionError {
+    /// Invalid base64 or transaction envelope XDR.
+    InvalidEnvelope(xdr::Error),
+    /// An ordinary transaction was requested from a fee-bump envelope.
+    UnexpectedFeeBump,
+}
+
+impl fmt::Display for TransactionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEnvelope(error) => write!(f, "invalid transaction envelope: {error}"),
+            Self::UnexpectedFeeBump => {
+                write!(f, "expected an ordinary transaction, found a fee bump")
+            }
+        }
+    }
+}
+
+impl Error for TransactionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::InvalidEnvelope(error) => Some(error),
+            Self::UnexpectedFeeBump => None,
+        }
+    }
+}
+
+impl ParsedTransaction {
+    /// Select an ordinary transaction, refusing to silently unwrap a fee bump.
+    pub fn into_transaction(self) -> Result<Transaction, TransactionError> {
+        match self {
+            Self::Transaction(transaction) => Ok(transaction),
+            Self::FeeBump(_) => Err(TransactionError::UnexpectedFeeBump),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Transaction {
@@ -32,9 +81,9 @@ pub struct Transaction {
     pub time_bounds: Option<xdr::TimeBounds>,
     pub ledger_bounds: Option<xdr::LedgerBounds>,
     pub min_account_sequence: Option<String>,
-    pub min_account_sequence_age: Option<u32>,
+    pub min_account_sequence_age: Option<u64>,
     pub min_account_sequence_ledger_gap: Option<u32>,
-    pub extra_signers: Option<Vec<xdr::AccountId>>,
+    pub extra_signers: Option<Vec<xdr::SignerKey>>,
     pub operations: Option<Vec<xdr::Operation>>,
     pub hash: Option<[u8; 32]>,
     pub soroban_data: Option<SorobanTransactionData>,
@@ -46,7 +95,8 @@ pub trait TransactionBehavior {
     fn hash(&self) -> [u8; 32];
     fn sign(&mut self, keypairs: &[Keypair]);
     fn to_envelope(&self) -> Result<xdr::TransactionEnvelope, Box<dyn Error>>;
-    fn from_xdr_envelope(xdr: &str, network: &str) -> Self;
+    /// Decode any transaction envelope without panicking on untrusted input.
+    fn from_xdr_envelope(xdr: &str, network: &str) -> Result<ParsedTransaction, TransactionError>;
     //TODO: XDR Conversion, Proper From and To
 }
 
@@ -180,12 +230,13 @@ impl TransactionBehavior for Transaction {
         Ok(envelope)
     }
 
-    fn from_xdr_envelope(xdr: &str, network: &str) -> Self {
-        let tx_env = xdr::TransactionEnvelope::from_xdr_base64(xdr, Limits::none()).unwrap();
+    fn from_xdr_envelope(xdr: &str, network: &str) -> Result<ParsedTransaction, TransactionError> {
+        let tx_env = xdr::TransactionEnvelope::from_xdr_base64(xdr, Limits::none())
+            .map_err(TransactionError::InvalidEnvelope)?;
         let envelope_type = tx_env.discriminant();
 
-        match tx_env {
-            xdr::TransactionEnvelope::TxV0(tx_v0_env) => Self {
+        Ok(match tx_env {
+            xdr::TransactionEnvelope::TxV0(tx_v0_env) => ParsedTransaction::Transaction(Self {
                 //tx: None,
                 //tx_v0: Some(tx_v0_env.tx.clone()),
                 network_passphrase: network.to_owned(),
@@ -211,54 +262,66 @@ impl TransactionBehavior for Transaction {
                 operations: Some(tx_v0_env.tx.operations.to_vec()),
                 hash: None,
                 soroban_data: None,
-            },
+            }),
             xdr::TransactionEnvelope::Tx(tx_env) => {
-                let mut time_bounds = None;
-                let mut ledger_bounds = None;
-                let mut min_account_sequence = None;
-                let mut min_account_sequence_age = None;
-                let mut min_account_sequence_ledger_gap = None;
-                let mut extra_signers = None;
-
-                match tx_env.tx.cond.clone() {
-                    xdr::Preconditions::Time(tb) => {
-                        time_bounds = Some(tb);
-                    }
-                    xdr::Preconditions::V2(v2) => {
-                        time_bounds = v2.time_bounds;
-                        ledger_bounds = v2.ledger_bounds;
-                        min_account_sequence = v2
-                            .min_seq_num
-                            .map(|seq| seq.to_xdr_base64(Limits::none()).unwrap());
-                        min_account_sequence_age = Some(v2.min_seq_age);
-                        min_account_sequence_ledger_gap = Some(v2.min_seq_ledger_gap);
-                        extra_signers = Some(v2.extra_signers.to_vec());
-                    }
-                    xdr::Preconditions::None => {}
-                }
-
-                Self {
-                    //tx: Some(tx_env.clone().tx),
-                    //tx_v0: None,
-                    network_passphrase: network.to_owned(),
-                    signatures: tx_env.signatures.to_vec(),
-                    fee: tx_env.tx.fee,
-                    envelope_type,
-                    memo: Some(tx_env.tx.memo),
-                    sequence: Some(tx_env.tx.seq_num.0.to_string()),
-                    source: Some(encode_muxed_account_to_address(&tx_env.tx.source_account)),
-                    time_bounds,
-                    ledger_bounds,
-                    min_account_sequence,
-                    min_account_sequence_age: None,
-                    min_account_sequence_ledger_gap,
-                    extra_signers: None,
-                    operations: Some(tx_env.tx.operations.to_vec()),
-                    hash: None,
-                    soroban_data: None,
-                }
+                ParsedTransaction::Transaction(Self::from_v1_envelope(tx_env, network))
             }
-            _ => panic!("Invalid envelope type"),
+            xdr::TransactionEnvelope::TxFeeBump(envelope) => {
+                ParsedTransaction::FeeBump(FeeBumpTransaction {
+                    envelope,
+                    network_passphrase: network.to_owned(),
+                })
+            }
+        })
+    }
+}
+
+impl Transaction {
+    pub(crate) fn from_v1_envelope(tx_env: xdr::TransactionV1Envelope, network: &str) -> Self {
+        let mut time_bounds = None;
+        let mut ledger_bounds = None;
+        let mut min_account_sequence = None;
+        let mut min_account_sequence_age = None;
+        let mut min_account_sequence_ledger_gap = None;
+        let mut extra_signers = None;
+
+        match tx_env.tx.cond.clone() {
+            xdr::Preconditions::Time(tb) => {
+                time_bounds = Some(tb);
+            }
+            xdr::Preconditions::V2(v2) => {
+                time_bounds = v2.time_bounds;
+                ledger_bounds = v2.ledger_bounds;
+                min_account_sequence = v2.min_seq_num.map(|seq| seq.0.to_string());
+                min_account_sequence_age = Some(v2.min_seq_age.0);
+                min_account_sequence_ledger_gap = Some(v2.min_seq_ledger_gap);
+                extra_signers = Some(v2.extra_signers.to_vec());
+            }
+            xdr::Preconditions::None => {}
+        }
+
+        Self {
+            //tx: Some(tx_env.clone().tx),
+            //tx_v0: None,
+            network_passphrase: network.to_owned(),
+            signatures: tx_env.signatures.to_vec(),
+            fee: tx_env.tx.fee,
+            envelope_type: xdr::EnvelopeType::Tx,
+            memo: Some(tx_env.tx.memo),
+            sequence: Some(tx_env.tx.seq_num.0.to_string()),
+            source: Some(encode_muxed_account_to_address(&tx_env.tx.source_account)),
+            time_bounds,
+            ledger_bounds,
+            min_account_sequence,
+            min_account_sequence_age,
+            min_account_sequence_ledger_gap,
+            extra_signers,
+            operations: Some(tx_env.tx.operations.to_vec()),
+            hash: None,
+            soroban_data: match tx_env.tx.ext {
+                xdr::TransactionExt::V0 => None,
+                xdr::TransactionExt::V1(data) => Some(data),
+            },
         }
     }
 }
@@ -383,6 +446,131 @@ mod tests {
         transaction_builder::{TransactionBuilder, TransactionBuilderBehavior, TIMEOUT_INFINITE},
     };
 
+    fn parsing_fixture() -> xdr::TransactionV1Envelope {
+        let mut source = Account::new(
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            "20",
+        )
+        .unwrap();
+        let tx = TransactionBuilder::new(&mut source, Networks::testnet(), None)
+            .fee(100_u32)
+            .add_operation(
+                Operation::new()
+                    .payment(
+                        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                        &Asset::native(),
+                        1,
+                    )
+                    .unwrap(),
+            )
+            .build();
+        match tx.to_envelope().unwrap() {
+            xdr::TransactionEnvelope::Tx(envelope) => envelope,
+            _ => unreachable!(),
+        }
+    }
+
+    fn parse_fixture(envelope: xdr::TransactionEnvelope) -> ParsedTransaction {
+        Transaction::from_xdr_envelope(
+            &envelope.to_xdr_base64(Limits::none()).unwrap(),
+            Networks::testnet(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn parses_v0_envelope() {
+        let inner = parsing_fixture();
+        let envelope = xdr::TransactionV0Envelope {
+            tx: xdr::TransactionV0 {
+                source_account_ed25519: xdr::Uint256([0; 32]),
+                fee: inner.tx.fee,
+                seq_num: inner.tx.seq_num,
+                time_bounds: None,
+                memo: inner.tx.memo,
+                operations: inner.tx.operations,
+                ext: xdr::TransactionV0Ext::V0,
+            },
+            signatures: inner.signatures,
+        };
+        let tx = parse_fixture(xdr::TransactionEnvelope::TxV0(envelope))
+            .into_transaction()
+            .unwrap();
+        assert_eq!(tx.envelope_type, xdr::EnvelopeType::TxV0);
+        assert_eq!(tx.sequence.as_deref(), Some("21"));
+        assert_eq!(tx.fee, 100);
+    }
+
+    #[test]
+    fn parses_v1_envelope_with_preconditions_and_soroban_data() {
+        let mut inner = parsing_fixture();
+        let signer = xdr::SignerKey::Ed25519(xdr::Uint256([7; 32]));
+        inner.tx.cond = xdr::Preconditions::V2(xdr::PreconditionsV2 {
+            time_bounds: None,
+            ledger_bounds: None,
+            min_seq_num: Some(xdr::SequenceNumber(12)),
+            min_seq_age: xdr::Duration(u64::from(u32::MAX) + 34),
+            min_seq_ledger_gap: 5,
+            extra_signers: vec![signer.clone()].try_into().unwrap(),
+        });
+        let data = xdr::SorobanTransactionData::default();
+        inner.tx.ext = xdr::TransactionExt::V1(data.clone());
+        let tx = parse_fixture(xdr::TransactionEnvelope::Tx(inner))
+            .into_transaction()
+            .unwrap();
+        assert_eq!(tx.envelope_type, xdr::EnvelopeType::Tx);
+        assert_eq!(tx.min_account_sequence.as_deref(), Some("12"));
+        assert_eq!(tx.min_account_sequence_age, Some(u64::from(u32::MAX) + 34));
+        assert_eq!(tx.min_account_sequence_ledger_gap, Some(5));
+        assert_eq!(tx.extra_signers, Some(vec![signer]));
+        assert_eq!(tx.soroban_data, Some(data));
+    }
+
+    #[test]
+    fn parses_fee_bump_and_recovers_signed_inner_transaction() {
+        let mut inner = parsing_fixture();
+        let signature = xdr::DecoratedSignature {
+            hint: xdr::SignatureHint([1; 4]),
+            signature: xdr::Signature(vec![2; 64].try_into().unwrap()),
+        };
+        inner.signatures = vec![signature.clone()].try_into().unwrap();
+        let envelope = xdr::FeeBumpTransactionEnvelope {
+            tx: xdr::FeeBumpTransaction {
+                fee_source: xdr::MuxedAccount::Ed25519(xdr::Uint256([3; 32])),
+                fee: i64::from(u32::MAX) + 1,
+                inner_tx: xdr::FeeBumpTransactionInnerTx::Tx(inner.clone()),
+                ext: xdr::FeeBumpTransactionExt::V0,
+            },
+            signatures: vec![signature].try_into().unwrap(),
+        };
+        let parsed = parse_fixture(xdr::TransactionEnvelope::TxFeeBump(envelope.clone()));
+        assert!(matches!(
+            parsed.clone().into_transaction(),
+            Err(TransactionError::UnexpectedFeeBump)
+        ));
+        let ParsedTransaction::FeeBump(fee_bump) = parsed else {
+            panic!("expected fee bump");
+        };
+        assert_eq!(fee_bump.envelope(), &envelope);
+        assert_eq!(fee_bump.network_passphrase(), Networks::testnet());
+        let recovered = fee_bump.inner_transaction();
+        assert_eq!(recovered.signatures, inner.signatures.to_vec());
+        assert_eq!(
+            recovered.to_envelope().unwrap(),
+            xdr::TransactionEnvelope::Tx(inner)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_envelopes_without_panicking() {
+        for input in ["not base64!", "", "AAAAAg==", "AAAAAQ=="] {
+            assert!(matches!(
+                Transaction::from_xdr_envelope(input, Networks::testnet()),
+                Err(TransactionError::InvalidEnvelope(_)),
+            ));
+        }
+    }
+
     #[test]
     fn constructs_transaction_object_from_transaction_envelope() {
         let mut source = Account::new(
@@ -446,7 +634,10 @@ mod tests {
     #[test]
     fn calculates_correct_hash_with_non_utf8_strings() {
         let xdr = "AAAAAAtjwtJadppTmm0NtAU99BFxXXfzPO1N/SqR43Z8aXqXAAAAZAAIj6YAAAACAAAAAAAAAAEAAAAB0QAAAAAAAAEAAAAAAAAAAQAAAADLa6390PDAqg3qDLpshQxS+uVw3ytSgKRirQcInPWt1QAAAAAAAAAAA1Z+AAAAAAAAAAABfGl6lwAAAEBC655+8Izq54MIZrXTVF/E1ycHgQWpVcBD+LFkuOjjJd995u/7wM8sFqQqambL0/ME2FTOtxMO65B9i3eAIu4P";
-        let tx = Transaction::from_xdr_envelope(xdr, Networks::public());
+        let tx = Transaction::from_xdr_envelope(xdr, Networks::public())
+            .unwrap()
+            .into_transaction()
+            .unwrap();
 
         println!("Transaction {}", tx);
         assert_eq!(
