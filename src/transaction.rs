@@ -35,6 +35,17 @@ pub enum TransactionError {
     InvalidEnvelope(xdr::Error),
     /// An ordinary transaction was requested from a fee-bump envelope.
     UnexpectedFeeBump,
+    /// A mutable transaction field cannot be represented in the selected format.
+    InvalidField {
+        /// Invalid or missing field.
+        field: &'static str,
+        /// Why the field cannot be converted.
+        reason: &'static str,
+    },
+    /// Ordinary transactions can only use the V0 and V1 envelope types.
+    UnsupportedEnvelopeType(xdr::EnvelopeType),
+    /// A field exceeds its XDR bounds or cannot be encoded.
+    Encoding(xdr::Error),
 }
 
 impl fmt::Display for TransactionError {
@@ -44,6 +55,13 @@ impl fmt::Display for TransactionError {
             Self::UnexpectedFeeBump => {
                 write!(f, "expected an ordinary transaction, found a fee bump")
             }
+            Self::InvalidField { field, reason } => {
+                write!(f, "invalid transaction {field}: {reason}")
+            }
+            Self::UnsupportedEnvelopeType(kind) => {
+                write!(f, "unsupported ordinary transaction envelope: {kind:?}")
+            }
+            Self::Encoding(error) => write!(f, "transaction encoding error: {error}"),
         }
     }
 }
@@ -52,12 +70,21 @@ impl Error for TransactionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidEnvelope(error) => Some(error),
-            Self::UnexpectedFeeBump => None,
+            Self::Encoding(error) => Some(error),
+            _ => None,
         }
     }
 }
 
 impl ParsedTransaction {
+    /// Recover the original envelope, including signatures and its envelope variant.
+    pub fn to_envelope(&self) -> Result<xdr::TransactionEnvelope, TransactionError> {
+        match self {
+            Self::Transaction(transaction) => transaction.try_to_envelope(),
+            Self::FeeBump(transaction) => Ok(transaction.to_envelope()),
+        }
+    }
+
     /// Select an ordinary transaction, refusing to silently unwrap a fee bump.
     pub fn into_transaction(self) -> Result<Transaction, TransactionError> {
         match self {
@@ -91,7 +118,11 @@ pub struct Transaction {
 
 // Define a trait for Transaction behavior
 pub trait TransactionBehavior {
+    /// Build the signing payload. Panics on invalid mutable fields; use
+    /// [`Transaction::try_signature_base`] for a fallible alternative.
     fn signature_base(&self) -> Vec<u8>;
+    /// Compute the signing hash. Panics on invalid mutable fields; use
+    /// [`Transaction::try_hash`] for a fallible alternative.
     fn hash(&self) -> [u8; 32];
     fn sign(&mut self, keypairs: &[Keypair]);
     fn to_envelope(&self) -> Result<xdr::TransactionEnvelope, Box<dyn Error>>;
@@ -100,86 +131,160 @@ pub trait TransactionBehavior {
     //TODO: XDR Conversion, Proper From and To
 }
 
-impl Transaction {
-    fn to_tx(&self) -> xdr::Transaction {
-        let cond = match (&self.time_bounds, &self.ledger_bounds) {
-            (None, None) => xdr::Preconditions::None,
-            (Some(tb), None) => xdr::Preconditions::Time(tb.clone()),
-            (time_bounds, ledger_bounds) => xdr::Preconditions::V2(xdr::PreconditionsV2 {
-                time_bounds: time_bounds.clone(),
-                ledger_bounds: ledger_bounds.clone(),
-                min_seq_num: None,
-                min_seq_age: xdr::Duration(0),
-                min_seq_ledger_gap: 0,
-                extra_signers: xdr::VecM::default(),
-            }),
-        };
+#[cfg(test)]
+mod roundtrip_tests;
 
-        match self.envelope_type {
-            xdr::EnvelopeType::TxV0 => xdr::Transaction {
-                source_account: xdr::MuxedAccount::from_str(
-                    &self.source.clone().expect("No account"),
-                )
-                .expect("Invalid account"),
-                fee: self.fee,
-                seq_num: xdr::SequenceNumber(
-                    self.sequence
-                        .clone()
-                        .expect("No sequence number")
-                        .parse::<i64>()
-                        .expect("Invalid sequence number"),
-                ),
-                cond: cond.clone(),
-                memo: self.memo.clone().unwrap_or(xdr::Memo::None),
-                operations: self
-                    .operations
-                    .clone()
-                    .unwrap_or_default()
-                    .try_into()
-                    .expect("Invalid operations"),
-                ext: xdr::TransactionExt::V0,
-            },
-            xdr::EnvelopeType::Tx => xdr::Transaction {
-                source_account: xdr::MuxedAccount::from_str(
-                    &self.source.clone().expect("No account"),
-                )
-                .expect("Invalid account"),
-                fee: self.fee,
-                seq_num: xdr::SequenceNumber(
-                    self.sequence
-                        .clone()
-                        .expect("No sequence number")
-                        .parse()
-                        .expect("Invalid sequence number"),
-                ),
-                cond,
-                memo: self.memo.clone().unwrap_or(xdr::Memo::None),
-                operations: self
-                    .operations
-                    .clone()
-                    .unwrap_or_default()
-                    .try_into()
-                    .expect("Invalid operations"),
-                ext: if let Some(data) = self.soroban_data.clone() {
-                    xdr::TransactionExt::V1(data)
-                } else {
-                    xdr::TransactionExt::V0
-                },
-            },
-            _ => panic!("Transaction must have either tx or tx_v0 set"),
+impl Transaction {
+    fn to_tx(&self) -> Result<xdr::Transaction, TransactionError> {
+        if !matches!(
+            self.envelope_type,
+            xdr::EnvelopeType::Tx | xdr::EnvelopeType::TxV0
+        ) {
+            return Err(TransactionError::UnsupportedEnvelopeType(
+                self.envelope_type,
+            ));
         }
+        let invalid = |field, reason| TransactionError::InvalidField { field, reason };
+        let source = self
+            .source
+            .as_deref()
+            .ok_or_else(|| invalid("source", "missing account"))?;
+        let source_account = xdr::MuxedAccount::from_str(source)
+            .map_err(|_| invalid("source", "expected a G-address or M-address"))?;
+        let sequence = self
+            .sequence
+            .as_deref()
+            .ok_or_else(|| invalid("sequence", "missing sequence number"))?;
+        let seq_num = xdr::SequenceNumber(
+            sequence
+                .parse()
+                .map_err(|_| invalid("sequence", "expected an i64 decimal string"))?,
+        );
+
+        // Presence matters: even an all-zero V2 must keep its discriminant.
+        // The parser marks V2 with Some(age/gap/signers), including their defaults.
+        let has_v2 = self.ledger_bounds.is_some()
+            || self.min_account_sequence.is_some()
+            || self.min_account_sequence_age.is_some()
+            || self.min_account_sequence_ledger_gap.is_some()
+            || self.extra_signers.is_some();
+        if self.envelope_type == xdr::EnvelopeType::TxV0 {
+            if !matches!(source_account, xdr::MuxedAccount::Ed25519(_)) {
+                return Err(invalid("source", "V0 does not support muxed accounts"));
+            }
+            if has_v2 {
+                return Err(invalid(
+                    "preconditions",
+                    "V0 does not support V2 preconditions",
+                ));
+            }
+            if self.soroban_data.is_some() {
+                return Err(invalid("soroban_data", "V0 does not support Soroban data"));
+            }
+        }
+        let cond = if has_v2 {
+            xdr::Preconditions::V2(xdr::PreconditionsV2 {
+                time_bounds: self.time_bounds.clone(),
+                ledger_bounds: self.ledger_bounds.clone(),
+                min_seq_num: self
+                    .min_account_sequence
+                    .as_deref()
+                    .map(|seq| {
+                        seq.parse().map(xdr::SequenceNumber).map_err(|_| {
+                            invalid("min_account_sequence", "expected an i64 decimal string")
+                        })
+                    })
+                    .transpose()?,
+                min_seq_age: xdr::Duration(self.min_account_sequence_age.unwrap_or(0)),
+                min_seq_ledger_gap: self.min_account_sequence_ledger_gap.unwrap_or(0),
+                extra_signers: self
+                    .extra_signers
+                    .clone()
+                    .unwrap_or_default()
+                    .try_into()
+                    .map_err(TransactionError::Encoding)?,
+            })
+        } else {
+            self.time_bounds
+                .clone()
+                .map_or(xdr::Preconditions::None, xdr::Preconditions::Time)
+        };
+        Ok(xdr::Transaction {
+            source_account,
+            fee: self.fee,
+            seq_num,
+            cond,
+            memo: self.memo.clone().unwrap_or(xdr::Memo::None),
+            operations: self
+                .operations
+                .clone()
+                .unwrap_or_default()
+                .try_into()
+                .map_err(TransactionError::Encoding)?,
+            ext: self
+                .soroban_data
+                .clone()
+                .map_or(xdr::TransactionExt::V0, xdr::TransactionExt::V1),
+        })
+    }
+
+    /// Convert to an envelope with typed errors, never silently dropping fields.
+    pub fn try_to_envelope(&self) -> Result<xdr::TransactionEnvelope, TransactionError> {
+        let tx = self.to_tx()?;
+        let signatures = self
+            .signatures
+            .clone()
+            .try_into()
+            .map_err(TransactionError::Encoding)?;
+        if self.envelope_type == xdr::EnvelopeType::TxV0 {
+            let xdr::MuxedAccount::Ed25519(source_account_ed25519) = tx.source_account else {
+                return Err(TransactionError::InvalidField {
+                    field: "source",
+                    reason: "V0 does not support muxed accounts",
+                });
+            };
+            Ok(xdr::TransactionEnvelope::TxV0(xdr::TransactionV0Envelope {
+                tx: xdr::TransactionV0 {
+                    source_account_ed25519,
+                    fee: tx.fee,
+                    seq_num: tx.seq_num,
+                    time_bounds: self.time_bounds.clone(),
+                    memo: tx.memo,
+                    operations: tx.operations,
+                    ext: xdr::TransactionV0Ext::V0,
+                },
+                signatures,
+            }))
+        } else {
+            Ok(xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+                tx,
+                signatures,
+            }))
+        }
+    }
+
+    /// Build the signing payload with typed errors for invalid mutable fields.
+    pub fn try_signature_base(&self) -> Result<Vec<u8>, TransactionError> {
+        xdr::TransactionSignaturePayload {
+            network_id: xdr::Hash(Sha256Hasher::hash(self.network_passphrase.as_bytes())),
+            tagged_transaction: xdr::TransactionSignaturePayloadTaggedTransaction::Tx(
+                self.to_tx()?,
+            ),
+        }
+        .to_xdr(Limits::none())
+        .map_err(TransactionError::Encoding)
+    }
+
+    /// Compute the signing hash with typed errors for invalid mutable fields.
+    pub fn try_hash(&self) -> Result<[u8; 32], TransactionError> {
+        Ok(Sha256Hasher::hash(self.try_signature_base()?))
     }
 }
 
 impl TransactionBehavior for Transaction {
     fn signature_base(&self) -> Vec<u8> {
-        let tagged_tx = xdr::TransactionSignaturePayloadTaggedTransaction::Tx(self.to_tx());
-        let tx_sig = xdr::TransactionSignaturePayload {
-            network_id: xdr::Hash(Sha256Hasher::hash(self.network_passphrase.as_bytes())),
-            tagged_transaction: tagged_tx,
-        };
-
-        tx_sig.to_xdr(Limits::none()).unwrap()
+        self.try_signature_base()
+            .expect("invalid transaction; use try_signature_base for fallible conversion")
     }
 
     fn hash(&self) -> [u8; 32] {
@@ -197,37 +302,8 @@ impl TransactionBehavior for Transaction {
     }
 
     fn to_envelope(&self) -> Result<xdr::TransactionEnvelope, Box<dyn Error>> {
-        let raw_tx = self.to_tx().to_xdr_base64(xdr::Limits::none()).unwrap();
-
-        let mut signatures =
-            xdr::VecM::<DecoratedSignature, 20>::try_from(self.signatures.clone()).unwrap(); // Make a copy of the signatures
-
-        let envelope = match self.envelope_type {
-            xdr::EnvelopeType::TxV0 => {
-                let transaction_v0 = xdr::TransactionV0Envelope {
-                    tx: xdr::TransactionV0::from_xdr_base64(&raw_tx, xdr::Limits::none()).unwrap(), // Make a copy of tx
-                    signatures,
-                };
-                xdr::TransactionEnvelope::TxV0(transaction_v0)
-            }
-
-            xdr::EnvelopeType::Tx => {
-                let transaction_v1 = xdr::TransactionV1Envelope {
-                    tx: xdr::Transaction::from_xdr_base64(&raw_tx, xdr::Limits::none()).unwrap(), // Make a copy of tx
-                    signatures,
-                };
-                xdr::TransactionEnvelope::Tx(transaction_v1)
-            }
-            _ => {
-                return Err(format!(
-                    "Invalid TransactionEnvelope: expected an envelopeTypeTxV0 or envelopeTypeTx but received an {:?}.",
-                    self.envelope_type
-                )
-                .into());
-            }
-        };
-
-        Ok(envelope)
+        self.try_to_envelope()
+            .map_err(|error| Box::new(error) as Box<dyn Error>)
     }
 
     fn from_xdr_envelope(xdr: &str, network: &str) -> Result<ParsedTransaction, TransactionError> {
