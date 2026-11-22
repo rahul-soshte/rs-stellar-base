@@ -14,7 +14,7 @@ Add this to your Cargo.toml:
 
 ```toml
 [dependencies]
-stellar-baselib = "0.7.1"
+stellar-baselib = "0.8.0"
 ```
 
 And this to your code:
@@ -23,7 +23,11 @@ And this to your code:
 use stellar_baselib::*;
 ```
 
-## Envelope parsing migration (unreleased)
+## Envelope parsing migration (0.8.0)
+
+This is an intentional breaking change for **0.8.0**, not a `0.7.x` patch.
+See [MIGRATION.md](MIGRATION.md) for before/after examples, field-type changes,
+builder defaults and release considerations.
 
 `Transaction::from_xdr_envelope` now returns
 `Result<ParsedTransaction, TransactionError>` instead of `Transaction`. It accepts
@@ -72,7 +76,7 @@ Builders now leave unused V2-only fields as `None`, instead of placeholder
 `Some(0)`/empty values. Setting one of those fields explicitly selects V2;
 newly built transactions otherwise retain their existing None/Time encoding.
 
-## Fee-bump construction and signing (unreleased)
+## Fee-bump construction and signing (0.8.0)
 
 `FeeBumpTransaction::new(fee_source, total_fee, inner_envelope, network, network_base_fee)`
 wraps a signed V0 or V1 envelope without changing its signatures. V0 is normalized
@@ -135,12 +139,14 @@ let inner_hash = bump.inner_hash()?;
 key or more than twenty signatures). Hashes are computed from their respective
 network-specific signature payloads, not from the signed envelope bytes.
 Both `inner_envelope()` and `inner_transaction().try_to_envelope()` preserve the
-signed inner transaction. Client fee-bump submission is separate follow-up work.
+signed inner transaction. Submission is provided by `soroban-client` 0.8.0;
+this base crate does not perform network I/O.
 
 ## Protocol Compatibility
 
 | `stellar-baselib` version | Stellar Protocol Number | `stellar-xdr` | `stellar-strkey` |
 | ------------------------- | ----------------------- | ------------- | ---------------- |
+| `0.8.x`                   | Protocol 30             | `30.0.0`      | `1.0.0`          |
 | `0.7.x`                   | Protocol 30             | `30.0.0`      | `1.0.0`          |
 | `0.6.x`                   | Protocol 28             | `28.0.0`      | `0.0.15`         |
 
