@@ -35,15 +35,15 @@ fn payer() -> String {
 
 fn build(
     inner: xdr::TransactionV1Envelope,
-    fee: i64,
-    base: i64,
+    base_fee: i64,
+    network_base_fee: i64,
 ) -> Result<FeeBumpTransaction, FeeBumpError> {
     FeeBumpTransaction::new(
         &payer(),
-        fee,
+        base_fee,
         xdr::TransactionEnvelope::Tx(inner),
         Networks::testnet(),
-        base,
+        network_base_fee,
     )
 }
 
@@ -63,63 +63,83 @@ fn soroban(resource_fee: i64, fee: u32) -> xdr::TransactionV1Envelope {
 }
 
 #[test]
-fn enforces_classic_fee_boundaries_and_rounds_up() {
-    for (operations, inner_fee, base, minimum) in [
-        (1, 0, 100, 200),
-        (1, 100, 100, 200),
-        (1, 400, 100, 800),
-        (2, 200, 100, 300),
-        (2, 201, 100, 302),
-        (100, 10_000, 100, 10_100),
-        (1, 100, 250, 500),
-        (1, u32::MAX, 100, 2 * i64::from(u32::MAX)),
+fn enforces_per_operation_fee_boundaries_and_computes_classic_totals() {
+    // A 201/2 inclusion rate requires an integer bid of 101, giving a total of 303.
+    for (operations, inner_fee, network_base, minimum, total) in [
+        (1, 0, 100, 100, 200),
+        (1, 100, 100, 100, 200),
+        (1, 400, 100, 400, 800),
+        (2, 200, 100, 100, 300),
+        (2, 201, 100, 101, 303),
+        (3, 301, 100, 101, 404),
+        (100, 10_000, 100, 100, 10_100),
+        (100, 10_001, 100, 101, 10_201),
+        (1, 100, 250, 250, 500),
+        (
+            1,
+            u32::MAX,
+            100,
+            i64::from(u32::MAX),
+            2 * i64::from(u32::MAX),
+        ),
     ] {
         let inner = inner(operations, inner_fee);
-        let bump = build(inner.clone(), minimum, base).unwrap();
-        assert_eq!(bump.envelope().tx.fee, minimum);
+        let bump = build(inner.clone(), minimum, network_base).unwrap();
+        assert_eq!(bump.envelope().tx.fee, total);
         assert_eq!(bump.inner_envelope(), &inner);
-        assert!(matches!(build(inner, minimum - 1, base),
+        assert!(matches!(build(inner, minimum - 1, network_base),
             Err(FeeBumpError::InsufficientFee { fee, minimum: required })
                 if fee == minimum - 1 && required == minimum
         ));
     }
-    assert!(matches!(
-        build(inner(1, 100), -1, 100),
-        Err(FeeBumpError::InsufficientFee {
-            fee: -1,
-            minimum: 200
-        })
-    ));
+    for bid in [i64::MIN, -1, 0, 99] {
+        assert!(matches!(build(inner(1, 100), bid, 100),
+            Err(FeeBumpError::InsufficientFee { fee, minimum: 100 }) if fee == bid
+        ));
+    }
     assert_eq!(
-        build(inner(1, 100), i64::MAX, 100)
+        build(inner(1, 100), i64::MAX / 2, 100)
             .unwrap()
             .envelope()
             .tx
             .fee,
-        i64::MAX
+        i64::MAX - 1
     );
 }
 
 #[test]
 fn accounts_for_soroban_resources_once_and_allows_negative_inner_inclusion() {
-    for (resources, inner_fee, minimum) in [
-        (1_000, 1_100, 1_200),
-        (1_000, 1_400, 1_800),
-        (5_000, 100, 5_200),
+    for (resources, inner_fee, minimum, total) in [
+        (0, 100, 100, 200),
+        (1_000, 1_000, 100, 1_200),
+        (1_000, 1_100, 100, 1_200),
+        (1_000, 1_400, 400, 1_800),
+        (5_000, 100, 100, 5_200),
         (
             i64::from(u32::MAX) + 1_000,
             u32::MAX,
+            100,
             i64::from(u32::MAX) + 1_200,
         ),
-        (1_i64 << 50, 0, (1_i64 << 50) + 200),
+        (1_i64 << 50, 0, 100, (1_i64 << 50) + 200),
     ] {
         let inner = soroban(resources, inner_fee);
         let bump = build(inner.clone(), minimum, 100).unwrap();
+        assert_eq!(bump.envelope().tx.fee, total);
         assert_eq!(bump.inner_envelope(), &inner);
         assert!(matches!(build(inner, minimum - 1, 100),
             Err(FeeBumpError::InsufficientFee { minimum: required, .. }) if required == minimum
         ));
     }
+    // A bid above the minimum still adds resources once, not once per op.
+    assert_eq!(
+        build(soroban(1_000, 1_400), 500, 100)
+            .unwrap()
+            .envelope()
+            .tx
+            .fee,
+        2_000
+    );
     for resources in [-1, (1_i64 << 50) + 1] {
         assert!(matches!(build(soroban(resources, 100), i64::MAX, 100),
             Err(FeeBumpError::InvalidResourceFee(fee)) if fee == resources
@@ -131,7 +151,7 @@ fn accounts_for_soroban_resources_once_and_allows_negative_inner_inclusion() {
 fn rejects_invalid_base_fees_and_overflow_without_panicking() {
     for base in [0, -1, i64::MIN] {
         assert!(matches!(
-            build(inner(1, 100), 200, base),
+            build(inner(1, 100), 100, base),
             Err(FeeBumpError::InvalidBaseFee)
         ));
     }
@@ -140,7 +160,21 @@ fn rejects_invalid_base_fees_and_overflow_without_panicking() {
         Err(FeeBumpError::FeeOverflow)
     ));
     assert!(matches!(
-        build(soroban(1_000, 100), i64::MAX, i64::MAX / 2),
+        build(inner(1, 100), i64::MAX / 2 + 1, 100),
+        Err(FeeBumpError::FeeOverflow)
+    ));
+    // Inclusion multiplication fits but adding resources would overflow.
+    let largest_bid = (i64::MAX - 1_000) / 2;
+    assert_eq!(
+        build(soroban(1_000, 100), largest_bid, 100)
+            .unwrap()
+            .envelope()
+            .tx
+            .fee,
+        i64::MAX - 1
+    );
+    assert!(matches!(
+        build(soroban(1_000, 100), largest_bid + 1, 100),
         Err(FeeBumpError::FeeOverflow)
     ));
 }
@@ -148,19 +182,19 @@ fn rejects_invalid_base_fees_and_overflow_without_panicking() {
 #[test]
 fn rejects_unsuitable_inner_transactions() {
     assert!(matches!(
-        build(inner(0, 100), 200, 100),
+        build(inner(0, 100), 100, 100),
         Err(FeeBumpError::InvalidInnerTransaction(_))
     ));
     let mut missing_data = soroban(1_000, 100);
     missing_data.tx.ext = xdr::TransactionExt::V0;
     assert!(matches!(
-        build(missing_data, 2_000, 100),
+        build(missing_data, 100, 100),
         Err(FeeBumpError::InvalidInnerTransaction(_))
     ));
     let mut wrong_operations = inner(1, 100);
     wrong_operations.tx.ext = xdr::TransactionExt::V1(Default::default());
     assert!(matches!(
-        build(wrong_operations, 2_000, 100),
+        build(wrong_operations, 100, 100),
         Err(FeeBumpError::InvalidInnerTransaction(_))
     ));
     let mut mixed = soroban(1_000, 100);
@@ -168,12 +202,12 @@ fn rejects_unsuitable_inner_transactions() {
     ops.extend(inner(1, 100).tx.operations.to_vec());
     mixed.tx.operations = ops.try_into().unwrap();
     assert!(matches!(
-        build(mixed, 2_000, 100),
+        build(mixed, 100, 100),
         Err(FeeBumpError::InvalidInnerTransaction(_))
     ));
-    let bump = build(inner(1, 100), 200, 100).unwrap();
+    let bump = build(inner(1, 100), 100, 100).unwrap();
     assert!(matches!(
-        FeeBumpTransaction::new(&payer(), 400, bump.to_envelope(), Networks::testnet(), 100),
+        FeeBumpTransaction::new(&payer(), 200, bump.to_envelope(), Networks::testnet(), 100),
         Err(FeeBumpError::NestedFeeBump)
     ));
 }
@@ -187,7 +221,7 @@ fn accepts_muxed_fee_sources_and_rejects_other_addresses() {
     let address = encode_muxed_account_to_address(&source);
     let bump = FeeBumpTransaction::new(
         &address,
-        200,
+        100,
         xdr::TransactionEnvelope::Tx(inner(1, 100)),
         Networks::testnet(),
         100,
@@ -203,7 +237,7 @@ fn accepts_muxed_fee_sources_and_rejects_other_addresses() {
         assert!(matches!(
             FeeBumpTransaction::new(
                 source,
-                200,
+                100,
                 xdr::TransactionEnvelope::Tx(inner(1, 100)),
                 Networks::testnet(),
                 100
@@ -215,7 +249,8 @@ fn accepts_muxed_fee_sources_and_rejects_other_addresses() {
 
 #[test]
 fn matches_independently_encoded_signature_payload_vectors() {
-    let bump = build(inner(1, 100), 300, 100).unwrap();
+    let bump = build(inner(1, 100), 150, 100).unwrap();
+    assert_eq!(bump.envelope().tx.fee, 300);
     assert_eq!(
         hex::encode(bump.inner_hash().unwrap()),
         "b715c9db3cbdacc3118aa9d8e13a160cdb7b3311154dd37edf17b51587682efa"
@@ -255,7 +290,7 @@ fn signs_with_a_different_payer_and_preserves_the_inner_envelope() {
     let bytes = inner.to_xdr(Limits::none()).unwrap();
     let mut bump = FeeBumpTransaction::new(
         &payer.public_key(),
-        300,
+        150,
         xdr::TransactionEnvelope::Tx(inner),
         Networks::testnet(),
         100,
@@ -290,14 +325,14 @@ fn signs_with_a_different_payer_and_preserves_the_inner_envelope() {
 #[test]
 fn hash_commits_to_network_fee_payer_and_inner_signatures() {
     let inner = inner(1, 100);
-    let bump = build(inner.clone(), 300, 100).unwrap();
-    let higher = build(inner.clone(), 400, 100).unwrap();
+    let bump = build(inner.clone(), 150, 100).unwrap();
+    let higher = build(inner.clone(), 200, 100).unwrap();
     assert_ne!(bump.hash().unwrap(), higher.hash().unwrap());
     assert_eq!(bump.inner_hash().unwrap(), higher.inner_hash().unwrap());
     let other_payer = Keypair::from_raw_ed25519_seed(&[4; 32]).unwrap();
     let other = FeeBumpTransaction::new(
         &other_payer.public_key(),
-        300,
+        150,
         xdr::TransactionEnvelope::Tx(inner.clone()),
         Networks::testnet(),
         100,
@@ -307,7 +342,7 @@ fn hash_commits_to_network_fee_payer_and_inner_signatures() {
     assert_eq!(bump.inner_hash().unwrap(), other.inner_hash().unwrap());
     let network = FeeBumpTransaction::new(
         &payer(),
-        300,
+        150,
         xdr::TransactionEnvelope::Tx(inner.clone()),
         Networks::public(),
         100,
@@ -320,7 +355,7 @@ fn hash_commits_to_network_fee_payer_and_inner_signatures() {
     signed.signatures = vec![key.sign_decorated(&bump.inner_hash().unwrap())]
         .try_into()
         .unwrap();
-    let signed = build(signed, 300, 100).unwrap();
+    let signed = build(signed, 150, 100).unwrap();
     assert_ne!(bump.hash().unwrap(), signed.hash().unwrap());
     assert_eq!(bump.inner_hash().unwrap(), signed.inner_hash().unwrap());
 }
@@ -329,7 +364,7 @@ fn hash_commits_to_network_fee_payer_and_inner_signatures() {
 fn signing_errors_are_atomic_and_enforce_the_signature_limit() {
     let key = Keypair::from_raw_ed25519_seed(&[4; 32]).unwrap();
     let public_only = Keypair::from_public_key(&key.public_key()).unwrap();
-    let mut bump = build(inner(1, 100), 300, 100).unwrap();
+    let mut bump = build(inner(1, 100), 150, 100).unwrap();
     let original = bump.envelope().clone();
     assert!(matches!(
         bump.sign(&[key.clone(), public_only]),
@@ -377,7 +412,7 @@ fn normalizes_v0_without_changing_the_inner_hash_or_signatures() {
     };
     let bump = FeeBumpTransaction::new(
         &payer(),
-        200,
+        100,
         xdr::TransactionEnvelope::TxV0(legacy),
         Networks::testnet(),
         100,
@@ -413,7 +448,7 @@ fn preserves_signed_soroban_data_and_v2_preconditions() {
     });
     let hash = sign_inner(&mut inner, &key);
     let bytes = inner.to_xdr(Limits::none()).unwrap();
-    let mut bump = build(inner, 1_200, 100).unwrap();
+    let mut bump = build(inner, 100, 100).unwrap();
     bump.sign(&[key]).unwrap();
     assert_eq!(bump.inner_hash().unwrap(), hash);
     assert_eq!(bump.inner_envelope().to_xdr(Limits::none()).unwrap(), bytes);

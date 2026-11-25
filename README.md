@@ -78,22 +78,30 @@ newly built transactions otherwise retain their existing None/Time encoding.
 
 ## Fee-bump construction and signing (0.8.0)
 
-`FeeBumpTransaction::new(fee_source, total_fee, inner_envelope, network, network_base_fee)`
+`FeeBumpTransaction::new(fee_source, base_fee, inner_envelope, network, network_base_fee)`
 wraps a signed V0 or V1 envelope without changing its signatures. V0 is normalized
 to V1. The fee source may be a G-address or M-address and can differ from the
 inner transaction source. Nested fee bumps are refused.
 
-Both fees are in stroops: `total_fee` is an `i64` **total**, while
-`network_base_fee` is the current ledger fee **per operation**, supplied by the
-caller. The constructor checks:
+Both `base_fee` and `network_base_fee` are `i64` values in **stroops per operation**.
+`base_fee` is the caller's maximum inclusion-fee bid.
+`network_base_fee` is the current ledger minimum,
+supplied by the caller because this crate does not perform network I/O.
+The constructor validates the bid, then calculates the **total** stored in XDR:
 
 ```text
 n = inner operation count
 r = declared Soroban resource fee (zero for classic transactions)
-minimum total = r + max(base_fee * (n + 1), ceil(max(inner.fee - r, 0) * (n + 1) / n))
+minimum base_fee = max(network_base_fee, ceil(max(inner.fee - r, 0) / n))
+total fee = base_fee * (n + 1) + r
 ```
 
-An insufficient fee returns `FeeBumpError::InsufficientFee { fee, minimum }`.
+An insufficient bid returns `FeeBumpError::InsufficientFee { fee, minimum }`,
+where both fields are **per-operation** values. For one classic inner operation,
+a bid of 100 produces a total of 200; a bid of 99 fails when the network minimum
+is 100. Soroban resource fees are added once, not multiplied by the operation
+count. If two inner operations offer 201 stroops, the minimum integer bid is 101
+and the resulting total is 303.
 Arithmetic overflow and invalid fee sources/inner structures also return typed
 errors. Soroban rules target the current Protocol 23+ behavior: the outer
 transaction can pay resource fees exceeding the inner transaction's `u32` fee.
@@ -125,7 +133,7 @@ let mut inner = TransactionBuilder::new(&mut source, Networks::testnet(), None)
     .build();
 inner.sign(&[source_key]);
 let mut bump = FeeBumpTransaction::new(
-    &payer.public_key(), 200, inner.to_envelope()?, Networks::testnet(), 100,
+    &payer.public_key(), 100, inner.to_envelope()?, Networks::testnet(), 100,
 )?;
 bump.sign(&[payer])?;
 let signed_envelope = bump.to_envelope();

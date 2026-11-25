@@ -22,13 +22,13 @@ pub enum FeeBumpError {
     InvalidInnerTransaction(&'static str),
     /// The declared Soroban resource fee is outside the protocol range.
     InvalidResourceFee(i64),
-    /// The required total fee cannot be represented as an i64.
+    /// The computed total fee cannot be represented as an i64.
     FeeOverflow,
-    /// The offered total fee is below the protocol minimum.
+    /// The offered inclusion fee per operation is below the required minimum.
     InsufficientFee {
-        /// Offered total fee in stroops.
+        /// Offered inclusion fee in stroops per operation.
         fee: i64,
-        /// Required total fee in stroops.
+        /// Required inclusion fee in stroops per operation.
         minimum: i64,
     },
     /// An outer envelope may contain at most twenty signatures.
@@ -51,9 +51,12 @@ impl fmt::Display for FeeBumpError {
                 write!(f, "invalid inner transaction: {reason}")
             }
             Self::InvalidResourceFee(fee) => write!(f, "invalid Soroban resource fee: {fee}"),
-            Self::FeeOverflow => write!(f, "required fee exceeds i64::MAX"),
+            Self::FeeOverflow => write!(f, "fee-bump total exceeds i64::MAX"),
             Self::InsufficientFee { fee, minimum } => {
-                write!(f, "fee {fee} is below the minimum {minimum} stroops")
+                write!(
+                    f,
+                    "base fee {fee} is below the minimum {minimum} stroops per operation"
+                )
             }
             Self::TooManySignatures => {
                 write!(f, "fee bump cannot contain more than twenty signatures")
@@ -84,14 +87,17 @@ pub struct FeeBumpTransaction {
 impl FeeBumpTransaction {
     /// Wrap an existing signed V0 or V1 transaction with an explicit fee payer.
     ///
-    /// `fee` is the **total outer fee in stroops**, not a per-operation fee.
+    /// `base_fee` is the maximum inclusion fee in **stroops per operation**.
+    /// The total XDR fee is
+    /// `base_fee * (inner_operation_count + 1) + soroban_resource_fee`.
     /// `network_base_fee` is the current ledger base fee in stroops per operation;
     /// the caller supplies it because this crate does not perform network I/O.
     /// V0 envelopes are normalized to V1 without changing their signing payload.
     /// Inner signatures and transaction contents are otherwise preserved verbatim.
     ///
-    /// Checks the minimum inclusion fee and the outer/inner inclusion-fee rate,
-    /// adding Soroban resource fees once. Uses the current (Protocol 23+) rule
+    /// Checks the per-operation bid against the network minimum and the rounded-up
+    /// inner inclusion-fee rate, adding Soroban resource fees once to the total.
+    /// Uses the current (Protocol 23+) rule
     /// allowing the outer transaction to fund a negative inner inclusion fee.
     /// This does not check account state, signatures, resource estimates, surge
     /// pricing, or the separate 10x rate needed to replace a queued transaction.
@@ -108,7 +114,7 @@ impl FeeBumpTransaction {
     /// // Example: a one-operation inner transaction bidding 100 stroops.
     /// # fn wrap(inner: TransactionEnvelope, payer: &Keypair) -> Result<(), FeeBumpError> {
     /// let mut bump = FeeBumpTransaction::new(
-    ///     &payer.public_key(), 200, inner, Networks::testnet(), 100,
+    ///     &payer.public_key(), 100, inner, Networks::testnet(), 100,
     /// )?;
     /// bump.sign(std::slice::from_ref(payer))?;
     /// let signed_envelope = bump.to_envelope();
@@ -118,7 +124,7 @@ impl FeeBumpTransaction {
     /// ```
     pub fn new(
         fee_source: &str,
-        fee: i64,
+        base_fee: i64,
         inner: xdr::TransactionEnvelope,
         network_passphrase: &str,
         network_base_fee: i64,
@@ -144,10 +150,17 @@ impl FeeBumpTransaction {
             },
             xdr::TransactionEnvelope::TxFeeBump(_) => return Err(FeeBumpError::NestedFeeBump),
         };
-        let minimum = minimum_fee(&inner.tx, network_base_fee)?;
-        if fee < minimum {
-            return Err(FeeBumpError::InsufficientFee { fee, minimum });
+        let (minimum, resource_fee) = fee_requirements(&inner.tx, network_base_fee)?;
+        if base_fee < minimum {
+            return Err(FeeBumpError::InsufficientFee {
+                fee: base_fee,
+                minimum,
+            });
         }
+        let fee = base_fee
+            .checked_mul(inner.tx.operations.len() as i64 + 1)
+            .and_then(|inclusion_fee| inclusion_fee.checked_add(resource_fee))
+            .ok_or(FeeBumpError::FeeOverflow)?;
         Ok(Self {
             envelope: xdr::FeeBumpTransactionEnvelope {
                 tx: xdr::FeeBumpTransaction {
@@ -244,8 +257,12 @@ impl FeeBumpTransaction {
     }
 }
 
-fn minimum_fee(inner: &xdr::Transaction, base_fee: i64) -> Result<i64, FeeBumpError> {
-    if base_fee <= 0 {
+// Returns (minimum per-operation inclusion bid, declared resource fee).
+fn fee_requirements(
+    inner: &xdr::Transaction,
+    network_base_fee: i64,
+) -> Result<(i64, i64), FeeBumpError> {
+    if network_base_fee <= 0 {
         return Err(FeeBumpError::InvalidBaseFee);
     }
     if inner.operations.is_empty() {
@@ -277,21 +294,16 @@ fn minimum_fee(inner: &xdr::Transaction, base_fee: i64) -> Result<i64, FeeBumpEr
 
     // Core compares inclusion-fee rates, excluding resource fees from BOTH
     // envelopes. Protocol 23+ permits negative inner inclusion fees.
-    // required = resources + max(base * (n + 1), ceil(max(innerFee-resources, 0) * (n+1) / n))
+    // Minimum integer per-operation inclusion bid:
+    // required base = max(network base, ceil(max(innerFee - resources, 0) / n)).
+    // Resources are added once to the final total, not multiplied per operation.
     let operations = inner.operations.len() as i64;
-    let outer_operations = operations + 1;
-    let network_minimum = base_fee
-        .checked_mul(outer_operations)
-        .ok_or(FeeBumpError::FeeOverflow)?;
     let inner_inclusion = (i64::from(inner.fee) - resource_fee).max(0);
     let rate_minimum = inner_inclusion
-        .checked_mul(outer_operations)
-        .and_then(|fee| fee.checked_add(operations - 1))
+        .checked_add(operations - 1)
         .ok_or(FeeBumpError::FeeOverflow)?
         / operations;
-    resource_fee
-        .checked_add(network_minimum.max(rate_minimum))
-        .ok_or(FeeBumpError::FeeOverflow)
+    Ok((network_base_fee.max(rate_minimum), resource_fee))
 }
 
 #[cfg(test)]

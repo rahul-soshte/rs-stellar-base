@@ -251,7 +251,7 @@ fn roundtrips_signed_soroban_and_fee_bump_with_exact_inner_recovery() {
         assert_roundtrip(xdr::TransactionEnvelope::Tx(inner.clone()));
         let mut bump = FeeBumpTransaction::new(
             &key().public_key(),
-            i64::from(u32::MAX) + 201,
+            100,
             xdr::TransactionEnvelope::Tx(inner),
             Networks::testnet(),
             100,
