@@ -3,8 +3,6 @@
 //! for reading, writing, hashing, and signing primitive XDR constructs
 //! utilized in the Stellar network.
 //! It provides a nice abstraction for building and signing transactions
-/// Helpers for authorizing Soroban entries (CAP-0071, Protocol 27)
-pub mod authorize_entry;
 /// `Account` represents a single account in the Stellar network and its sequence number.
 pub mod account;
 /// `Address` represents a single address in the Stellar network.
@@ -12,9 +10,13 @@ pub mod address;
 /// Asset class represents an asset, either the native asset (`XLM`)
 /// or an asset code / issuer account ID pair
 pub mod asset;
+/// Helpers for authorizing Soroban entries (CAP-0071, Protocol 27)
+pub mod authorize_entry;
 pub mod claimant;
 /// `Contract` represents a single contract in the Stellar network
 pub mod contract;
+/// Fee-bump transaction envelopes.
+pub mod fee_bump_transaction;
 pub mod get_liquidity_pool;
 pub mod hashing;
 pub mod keypair;
